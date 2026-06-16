@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none"
+     xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="native_mouse_cursor">
+  <defs>
+    <linearGradient id="bg" x1="40" y1="24" x2="472" y2="488"
+                    gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.32" cy="0.18" r="0.9">
+      <stop stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14"
+                    flood-color="#1E1B4B" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- badge -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#sheen)"/>
+
+  <!-- rotation hint: a dashed orbit the cursor turns within -->
+  <circle cx="256" cy="262" r="170" fill="none" stroke="#FFFFFF"
+          stroke-opacity="0.26" stroke-width="9"
+          stroke-dasharray="3 28" stroke-linecap="round"/>
+
+  <!-- the classic pointer, with a baked drop shadow -->
+  <g filter="url(#shadow)">
+    <path d="M168 121 L168 334 L228 289 L266 391 L302 376 L264 277 L344 268 Z"
+          fill="#FFFFFF" stroke="#1E1B4B" stroke-width="11"
+          stroke-linejoin="round"/>
+  </g>
+</svg>
