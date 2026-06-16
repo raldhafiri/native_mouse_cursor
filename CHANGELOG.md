@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fix README images not rendering on pub.dev (it doesn't display SVG) — the logo
+  and platform icons are now PNG.
+
 ## 1.0.0
 
 🎉 First stable release.

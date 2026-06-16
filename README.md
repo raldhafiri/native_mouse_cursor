@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="doc/logo.svg" width="120" alt="native_mouse_cursor logo">
+  <img src="doc/logo.png" width="120" alt="native_mouse_cursor logo">
 </p>
 
 # native_mouse_cursor
@@ -35,12 +35,12 @@ draws it for you. 🪄
 
 | | Platform | Backend | Status |
 | :---: | --- | --- | --- |
-| <img src="doc/platform_icons/apple.svg" width="18" height="18" alt="" align="middle"> | **macOS** | `NSCursor` (Swift, **SPM**) | ✅ Supported |
-| <img src="doc/platform_icons/windows.svg" width="18" height="18" alt="" align="middle"> | **Windows** | `HCURSOR` (Win32) | ✅ Supported |
-| <img src="doc/platform_icons/linux.svg" width="18" height="18" alt="" align="middle"> | **Linux** | `GdkCursor` (GTK) | ✅ Supported |
-| <img src="doc/platform_icons/android.svg" width="18" height="18" alt="" align="middle"> | **Android** | `PointerIcon` (API 24+) | ✅ Supported ² |
-| <img src="doc/platform_icons/web.svg" width="18" height="18" alt="" align="middle"> | **Web** | CSS `url(...)` cursor | ✅ Supported ¹ |
-| <img src="doc/platform_icons/apple.svg" width="18" height="18" alt="" align="middle"> | **iOS / iPadOS** | system pointer | ❌ Not possible ³ |
+| <img src="doc/platform_icons/apple.png" width="18" height="18" alt="" align="middle"> | **macOS** | `NSCursor` (Swift, **SPM**) | ✅ Supported |
+| <img src="doc/platform_icons/windows.png" width="18" height="18" alt="" align="middle"> | **Windows** | `HCURSOR` (Win32) | ✅ Supported |
+| <img src="doc/platform_icons/linux.png" width="18" height="18" alt="" align="middle"> | **Linux** | `GdkCursor` (GTK) | ✅ Supported |
+| <img src="doc/platform_icons/android.png" width="18" height="18" alt="" align="middle"> | **Android** | `PointerIcon` (API 24+) | ✅ Supported ² |
+| <img src="doc/platform_icons/web.png" width="18" height="18" alt="" align="middle"> | **Web** | CSS `url(...)` cursor | ✅ Supported ¹ |
+| <img src="doc/platform_icons/apple.png" width="18" height="18" alt="" align="middle"> | **iOS / iPadOS** | system pointer | ❌ Not possible ³ |
 
 <sub>¹ Each cursor is applied as a CSS `cursor: url(...)` value, sized in logical
 px and capped at 128 px (browsers draw a cursor image at its intrinsic pixels and
@@ -65,7 +65,7 @@ is touch-only — no pointer to replace.</sub>
 
 ```yaml
 dependencies:
-  native_mouse_cursor: ^1.0.0
+  native_mouse_cursor: ^1.0.1
 ```
 
 ```bash
@@ -206,12 +206,12 @@ MaterialApp(
 
 This is useful where the system cursor can actually be **hidden**:
 
-- <img src="doc/platform_icons/web.svg" height="14" alt="" align="middle"> **Web** — a perfectly seamless per-region cursor (the engine's CSS handling
+- <img src="doc/platform_icons/web.png" height="14" alt="" align="middle"> **Web** — a perfectly seamless per-region cursor (the engine's CSS handling
   is best-effort across regions); the CSS cursor is hidden.
-- <img src="doc/platform_icons/android.svg" height="14" alt="" align="middle"> **Android** — recommended for a **rotating** cursor: the native `PointerIcon`
+- <img src="doc/platform_icons/android.png" height="14" alt="" align="middle"> **Android** — recommended for a **rotating** cursor: the native `PointerIcon`
   flickers when swapped rapidly (an OS quirk), so the painted overlay (system
   pointer hidden) gives smooth rotation.
-- <img src="doc/platform_icons/apple.svg" height="14" alt="" align="middle"> <img src="doc/platform_icons/windows.svg" height="14" alt="" align="middle"> <img src="doc/platform_icons/linux.svg" height="14" alt="" align="middle"> **macOS / Windows / Linux** — preview the painted cursor (the native cursor is
+- <img src="doc/platform_icons/apple.png" height="14" alt="" align="middle"> <img src="doc/platform_icons/windows.png" height="14" alt="" align="middle"> <img src="doc/platform_icons/linux.png" height="14" alt="" align="middle"> **macOS / Windows / Linux** — preview the painted cursor (the native cursor is
   already pixel-perfect, so you rarely need this).
 
 Off by default; the widget is a transparent pass-through unless `force` is set.
