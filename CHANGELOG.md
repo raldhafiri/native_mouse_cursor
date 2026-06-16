@@ -2,8 +2,8 @@
 
 ## 1.0.1
 
-- Fix README images not rendering on pub.dev (it doesn't display SVG) — the logo
-  and platform icons are now PNG.
+- Documentation only: tidy the platform-support icons in the README. No code
+  changes.
 
 ## 1.0.0
 
