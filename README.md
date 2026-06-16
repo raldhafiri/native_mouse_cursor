@@ -35,12 +35,12 @@ draws it for you. 🪄
 
 | | Platform | Backend | Status |
 | :---: | --- | --- | --- |
-| <img src="doc/platform_icons/apple.svg" height="18" alt=""> | **macOS** | `NSCursor` (Swift, **SPM**) | ✅ Supported |
-| <img src="doc/platform_icons/windows.svg" height="18" alt=""> | **Windows** | `HCURSOR` (Win32) | ✅ Supported |
-| <img src="doc/platform_icons/linux.svg" height="18" alt=""> | **Linux** | `GdkCursor` (GTK) | ✅ Supported |
-| <img src="doc/platform_icons/android.svg" height="18" alt=""> | **Android** | `PointerIcon` (API 24+) | ✅ Supported ² |
-| <img src="doc/platform_icons/web.svg" height="18" alt=""> | **Web** | CSS `url(...)` cursor | ✅ Supported ¹ |
-| <img src="doc/platform_icons/apple.svg" height="18" alt=""> | **iOS / iPadOS** | system pointer | ❌ Not possible ³ |
+| <img src="doc/platform_icons/apple.svg" width="18" height="18" alt="" align="middle"> | **macOS** | `NSCursor` (Swift, **SPM**) | ✅ Supported |
+| <img src="doc/platform_icons/windows.svg" width="18" height="18" alt="" align="middle"> | **Windows** | `HCURSOR` (Win32) | ✅ Supported |
+| <img src="doc/platform_icons/linux.svg" width="18" height="18" alt="" align="middle"> | **Linux** | `GdkCursor` (GTK) | ✅ Supported |
+| <img src="doc/platform_icons/android.svg" width="18" height="18" alt="" align="middle"> | **Android** | `PointerIcon` (API 24+) | ✅ Supported ² |
+| <img src="doc/platform_icons/web.svg" width="18" height="18" alt="" align="middle"> | **Web** | CSS `url(...)` cursor | ✅ Supported ¹ |
+| <img src="doc/platform_icons/apple.svg" width="18" height="18" alt="" align="middle"> | **iOS / iPadOS** | system pointer | ❌ Not possible ³ |
 
 <sub>¹ Each cursor is applied as a CSS `cursor: url(...)` value, sized in logical
 px and capped at 128 px (browsers draw a cursor image at its intrinsic pixels and
