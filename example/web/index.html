@@ -41,6 +41,18 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    {{flutter_js}}
+    {{flutter_build_config}}
+    const userConfig = {'wasmAllowList': {'gecko': true, 'webkit': true}};
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.has('js')) {
+        userConfig.renderer = 'canvaskit';
+    }
+    if (searchParams.has('st')) {
+        userConfig.forceSingleThreadedSkwasm = true;
+    }
+    _flutter.loader.load({config: userConfig});
+  </script>
 </body>
 </html>

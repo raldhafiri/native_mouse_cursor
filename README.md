@@ -8,8 +8,12 @@
 > Flutter desktop, web & Android.
 
 [![pub package](https://img.shields.io/pub/v/native_mouse_cursor.svg)](https://pub.dev/packages/native_mouse_cursor)
+[![live demo](https://img.shields.io/badge/live-demo-success.svg)](https://raldhafiri.github.io/native_mouse_cursor/)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Android%20%7C%20Web-lightgrey.svg)](#-platform-support)
+
+> 🚀 **[Try the live web demo →](https://raldhafiri.github.io/native_mouse_cursor/)**
+> (web preview — full native cursors shine on macOS / Windows / Linux / Android)
 
 Unlike a cursor "painted" inside Flutter (a widget that chases the pointer), a
 `NativeMouseCursor` is handed to the **operating system**, so the OS compositor
