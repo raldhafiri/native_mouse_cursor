@@ -15,6 +15,13 @@
 > 🚀 **[Try the live web demo →](https://raldhafiri.github.io/native_mouse_cursor/)**
 > (web preview — full native cursors shine on macOS / Windows / Linux / Android)
 
+<p align="center">
+  <a href="https://raldhafiri.github.io/native_mouse_cursor/">
+    <img src="doc/demo.gif" width="560"
+         alt="native_mouse_cursor demo — a custom arrow cursor rotates to aim, mirrors across quadrants, and casts a baked drop shadow">
+  </a>
+</p>
+
 Unlike a cursor "painted" inside Flutter (a widget that chases the pointer), a
 `NativeMouseCursor` is handed to the **operating system**, so the OS compositor
 draws it for you. 🪄
