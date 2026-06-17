@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+
+- Add a live web demo (GitHub Pages) plus a demo GIF, live-demo link, and
+  `screenshots:` entry so it shows on pub.dev.
+- Add pub.dev `topics:` (cursor, mouse, pointer, ui, desktop) for discoverability.
+- Hide implementation-only libraries (`*_web`, `*_method_channel`,
+  `*_platform_interface`) from the generated API docs via `dartdoc_options.yaml`.
+- No runtime code changes.
+
 ## 1.0.1
 
 - Documentation only: tidy the platform-support icons in the README. No code

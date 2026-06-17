@@ -1,10 +1,21 @@
 name: native_mouse_cursor
 description: "Turn any image, SVG, or painted glyph into a real OS mouse cursor on Flutter desktop, web & Android."
-version: 1.0.1
+version: 1.0.2
 # Author: Rami Al-Dhafiri
 homepage: https://github.com/raldhafiri/native_mouse_cursor
 repository: https://github.com/raldhafiri/native_mouse_cursor
 issue_tracker: https://github.com/raldhafiri/native_mouse_cursor/issues
+
+topics:
+  - cursor
+  - mouse
+  - pointer
+  - ui
+  - desktop
+
+screenshots:
+  - description: "A custom cursor rotates to aim, mirrors across quadrants, and casts a baked drop shadow — shown on the live web demo."
+    path: doc/demo.gif
 
 environment:
   sdk: ^3.12.1

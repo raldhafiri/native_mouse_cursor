@@ -1,7 +1,3 @@
 # GitHub-only social card (not referenced by the README on pub.dev).
 doc/social_preview.png
 doc/social_preview.svg
-
-# Demo GIF — pub.dev renders README images via its proxy from the repo,
-# so it shows on pub.dev without bloating the published archive.
-doc/demo.gif
