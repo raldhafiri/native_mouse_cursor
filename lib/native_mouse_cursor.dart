@@ -11,6 +11,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import 'native_mouse_cursor_platform_interface.dart';
 
+export 'infinite_drag.dart';
+
 part 'native_mouse_cursor_overlay.dart';
 
 /// A real **OS mouse cursor** built from your own glyph.
@@ -164,6 +166,42 @@ class NativeMouseCursor extends MouseCursor {
   /// Forget every registered cursor and release all native bitmaps.
   static void disposeAll() => _managed?.disposeAll();
 
+  // ─────────────────────────── pointer warping ────────────────────────────────
+
+  /// Teleport the OS pointer to ([x], [y]) in Flutter-LOGICAL window
+  /// coordinates (top-left origin, y-down — the same space as
+  /// `PointerEvent.position`).
+  ///
+  /// This is the low-level primitive behind an **infinite drag**
+  /// (a value scrub): warp the pointer to the opposite edge when it reaches
+  /// the window border so the drag never runs out of room. Most consumers don't
+  /// call this directly — they drive an [InfiniteDragController], which handles
+  /// the edge math (and the web's pointer-lock fallback) for you.
+  ///
+  /// Native on macOS / Windows / Linux-X11; a graceful no-op on web, mobile and
+  /// Linux-Wayland (see [InfiniteDragController]).
+  ///
+  /// Pass [viewportWidth]/[viewportHeight] (the logical window size) when known
+  /// — on Windows it makes the warp exact at fractional display scales (e.g.
+  /// 250%); [InfiniteDragController] always supplies them.
+  static Future<void> warpPointer(
+    double x,
+    double y, {
+    double? viewportWidth,
+    double? viewportHeight,
+  }) =>
+      NativeMouseCursorPlatform.instance.warpPointer(
+        x,
+        y,
+        viewportWidth: viewportWidth,
+        viewportHeight: viewportHeight,
+      );
+
+  /// Whether this host can teleport the pointer via [warpPointer] — `true` on
+  /// macOS / Windows / Linux-X11, `false` on web / mobile / Linux-Wayland.
+  static Future<bool> canWarpPointer() =>
+      NativeMouseCursorPlatform.instance.canWarpPointer();
+
   // ─────────────────────────── MouseCursor wiring ─────────────────────────────
 
   @override
@@ -230,11 +268,22 @@ class NativeMouseCursor extends MouseCursor {
     final loW = math.max(1, (logicalW * loScale).round());
     final loH = math.max(1, (logicalH * loScale).round());
 
-    // hi: the device bitmap, but never above 128 px (Chrome's cursor cap).
-    final maxDevice = math.max(src.width, src.height).toDouble();
-    final hiScale = maxDevice > 128 ? 128 / maxDevice : 1.0;
-    final hiW = math.max(loW, (src.width * hiScale).round());
-    final hiH = math.max(loH, (src.height * hiScale).round());
+    // hi: a crisp device-resolution bitmap, served via image-set at an INTEGER
+    // density. Chrome lays an image-set cursor out in the 1x candidate's box and
+    // then draws the chosen candidate into it; if the hi candidate's
+    // density-adjusted size doesn't EXACTLY match the lo box, Chrome clips the
+    // cursor (the "clipped cursor" glitch). A fractional density
+    // (`hiW / loW` rounded to 2 dp) introduced exactly that mismatch. So we pin
+    // the density to a whole number `k` and size hi as `loW * k` — an exact
+    // multiple, so hi/k == lo and there's no rounding drift. `k` is the device
+    // ratio, capped so hi never exceeds Chrome's 128 px intrinsic limit.
+    var density = (src.width / loW).round();
+    if (density < 1) density = 1;
+    while (density > 1 && math.max(loW, loH) * density > 128) {
+      density--;
+    }
+    final hiW = loW * density;
+    final hiH = loH * density;
 
     final lo = await _resample(src, loW, loH);
     final hi = await _resample(src, hiW, hiH);
@@ -251,7 +300,7 @@ class NativeMouseCursor extends MouseCursor {
       key: key,
       lo: loPng,
       hi: hiPng,
-      density: hiW / loW, // hi's resolution multiplier vs the CSS size
+      density: density.toDouble(), // exact integer → no clip-causing drift
       hotX: (hotspot.dx * loScale).round(),
       hotY: (hotspot.dy * loScale).round(),
     );

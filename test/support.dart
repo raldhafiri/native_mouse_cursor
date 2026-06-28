@@ -81,6 +81,45 @@ class MockNativeMouseCursorPlatform
     pointerHidden.add(hidden);
   }
 
+  // Infinite-drag / pointer-warp surface (recorded so a controller test can
+  // assert the warp/lock calls).
+  final List<ui.Offset> warps = <ui.Offset>[];
+  bool canWarp = true;
+  int lockCount = 0;
+  int unlockCount = 0;
+  ui.Offset lockDelta = ui.Offset.zero;
+
+  @override
+  Future<void> warpPointer(
+    double x,
+    double y, {
+    double? viewportWidth,
+    double? viewportHeight,
+  }) async {
+    warps.add(ui.Offset(x, y));
+  }
+
+  @override
+  Future<bool> canWarpPointer() async => canWarp;
+
+  @override
+  Future<bool> lockPointer() async {
+    lockCount++;
+    return true;
+  }
+
+  @override
+  Future<void> unlockPointer() async {
+    unlockCount++;
+  }
+
+  @override
+  Future<ui.Offset> drainPointerLockDelta() async {
+    final d = lockDelta;
+    lockDelta = ui.Offset.zero;
+    return d;
+  }
+
   @override
   Future<void> createCursorWeb({
     required String key,

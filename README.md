@@ -201,6 +201,49 @@ NativeMouseCursor.dispose('rotate');  // 🧹 one cursor
 NativeMouseCursor.disposeAll();       // 🧼 everything
 ```
 
+## ↔️ Infinite drag (relative / warp)
+
+**Infinite drag**: drag a number (or any handle) and the value keeps changing
+forever because the **pointer wraps at the window edge** instead of running into
+it. `InfiniteDragController` owns all the per-OS work — you keep your
+own gesture and just feed it the pointer + viewport, and it returns the
+*effective* `dx` to apply (warp-jump frame already skipped, edge already wrapped):
+
+```dart
+final _drag = InfiniteDragController();
+
+GestureDetector(
+  onHorizontalDragStart: (d) => _drag.start(d.globalPosition),
+  onHorizontalDragUpdate: (d) async {
+    final dx = await _drag.update(
+      globalPosition: d.globalPosition,
+      delta: d.delta,
+      viewportSize: MediaQuery.sizeOf(context),
+    );
+    setState(() => value += dx * scrubRate);
+  },
+  onHorizontalDragEnd: (_) => _drag.end(),
+  onHorizontalDragCancel: () => _drag.cancel(),
+  child: handle,
+);
+```
+
+> 💡 The snippet above is the desktop **warp** path. To also support **web** and
+> **Wayland** (where the OS stops sending motion to Flutter while the pointer is
+> locked), pass an `onLockedDelta` callback to `start()` and apply the same scrub
+> there — see [doc/infinite_drag.md](doc/infinite_drag.md).
+
+The low-level primitive is also public: `NativeMouseCursor.warpPointer(x, y)`
+teleports the OS pointer to logical window coords, and
+`NativeMouseCursor.canWarpPointer()` reports whether the host supports it.
+
+Works on macOS, Windows, Linux (X11 **and** Wayland) and the web — each via the
+right native mechanism (cursor warp on most desktops; pointer-lock on Wayland and
+the web). The controller hides all of that, so your code stays the same
+everywhere. Mobile falls back to an ordinary clamped drag. For the per-platform
+mechanisms, the Wayland lock approach and the build requirements, see
+**[doc/infinite_drag.md](doc/infinite_drag.md)**.
+
 ## 🖌️ Painted overlay (web / desktop)
 
 Want the cursor painted **inside Flutter** instead of as a real OS cursor? Wrap

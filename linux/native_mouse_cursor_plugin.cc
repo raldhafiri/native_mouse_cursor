@@ -10,6 +10,10 @@
 #include <string>
 #include <unordered_map>
 
+// Pointer warp (X11) / lock (Wayland) subsystem lives in its own translation
+// unit so this file stays focused on cursor rendering + GObject boilerplate.
+#include "nmc_pointer.h"
+
 #define NATIVE_MOUSE_CURSOR_PLUGIN(obj)                                     \
   (G_TYPE_CHECK_INSTANCE_CAST((obj), native_mouse_cursor_plugin_get_type(), \
                               NativeMouseCursorPlugin))
@@ -18,6 +22,7 @@ struct _NativeMouseCursorPlugin {
   GObject parent_instance;
   FlPluginRegistrar* registrar;
   std::unordered_map<std::string, GdkCursor*>* cache;
+  NmcPointer* pointer;  // X11 warp / Wayland lock subsystem
 };
 
 G_DEFINE_TYPE(NativeMouseCursorPlugin, native_mouse_cursor_plugin,
@@ -141,6 +146,16 @@ static void native_mouse_cursor_plugin_handle_method_call(
     response = set_cursor(self, args);
   } else if (strcmp(method, "deleteCursor") == 0) {
     response = delete_cursor(self, args);
+  } else if (strcmp(method, "canWarpPointer") == 0) {
+    response = nmc_pointer_can_warp(self->pointer);
+  } else if (strcmp(method, "warpPointer") == 0) {
+    response = nmc_pointer_warp(self->pointer, args);
+  } else if (strcmp(method, "lockPointer") == 0) {
+    response = nmc_pointer_lock(self->pointer);
+  } else if (strcmp(method, "unlockPointer") == 0) {
+    response = nmc_pointer_unlock(self->pointer);
+  } else if (strcmp(method, "drainPointerLockDelta") == 0) {
+    response = nmc_pointer_drain(self->pointer);
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
@@ -157,6 +172,10 @@ static void native_mouse_cursor_plugin_dispose(GObject* object) {
     delete self->cache;
     self->cache = nullptr;
   }
+  if (self->pointer != nullptr) {
+    nmc_pointer_free(self->pointer);
+    self->pointer = nullptr;
+  }
   g_clear_object(&self->registrar);
   G_OBJECT_CLASS(native_mouse_cursor_plugin_parent_class)->dispose(object);
 }
@@ -168,6 +187,7 @@ static void native_mouse_cursor_plugin_class_init(
 
 static void native_mouse_cursor_plugin_init(NativeMouseCursorPlugin* self) {
   self->cache = new std::unordered_map<std::string, GdkCursor*>();
+  self->pointer = nullptr;  // created in register (needs the registrar)
 }
 
 static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
@@ -180,8 +200,10 @@ void native_mouse_cursor_plugin_register_with_registrar(
     FlPluginRegistrar* registrar) {
   NativeMouseCursorPlugin* plugin = NATIVE_MOUSE_CURSOR_PLUGIN(
       g_object_new(native_mouse_cursor_plugin_get_type(), nullptr));
-  // Keep a ref — the registrar is needed later (setCursor) to reach the view.
+  // Keep a ref — the registrar is needed later (setCursor / pointer) to reach
+  // the view.
   plugin->registrar = FL_PLUGIN_REGISTRAR(g_object_ref(registrar));
+  plugin->pointer = nmc_pointer_new(plugin->registrar);
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   g_autoptr(FlMethodChannel) channel =

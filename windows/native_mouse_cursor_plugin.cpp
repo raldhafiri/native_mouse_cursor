@@ -136,10 +136,14 @@ void NativeMouseCursorPlugin::HandleMethodCall(
     }
     const std::string key = std::get<std::string>(*key_v);
     const auto& bytes = std::get<std::vector<uint8_t>>(*buf_v);
-    const double dpr = GetDouble(*args, "devicePixelRatio", 1.0);
-    const double scale = dpr > 0 ? dpr : 1.0;
-    const int hot_x = static_cast<int>(GetDouble(*args, "hotX", 0) / scale);
-    const int hot_y = static_cast<int>(GetDouble(*args, "hotY", 0) / scale);
+    // The PNG is a DEVICE-pixel bitmap and hotX/hotY arrive in DEVICE pixels.
+    // CreateIconIndirect builds the HCURSOR from that full device-pixel bitmap
+    // at its native size (no logical resize on Windows, unlike macOS/Linux which
+    // tag the surface with the scale), so the hotspot must stay in DEVICE pixels
+    // — dividing by the DPR here put the click point ~(dpr-1)× the hotspot off
+    // (e.g. 8px on a 2× display). Pass it through unscaled.
+    const int hot_x = static_cast<int>(GetDouble(*args, "hotX", 0) + 0.5);
+    const int hot_y = static_cast<int>(GetDouble(*args, "hotY", 0) + 0.5);
 
     HCURSOR cursor = CursorFromPng(bytes, hot_x, hot_y);
     if (cursor == nullptr) {
@@ -180,6 +184,74 @@ void NativeMouseCursorPlugin::HandleMethodCall(
         DestroyCursor(it->second);
         cursors_.erase(it);
       }
+    }
+    result->Success();
+  } else if (method == "canWarpPointer") {
+    result->Success(EncodableValue(true));  // SetCursorPos is always available.
+  } else if (method == "warpPointer" && args != nullptr) {
+    // x/y AND viewportW/viewportH arrive in Flutter-LOGICAL window coords
+    // (top-left, y-down), the same space as MediaQuery / globalPosition.
+    //
+    // Strategy: map by RATIO across the window's real PHYSICAL client rect (no
+    // dpi/96 math, which overshoots at fractional scales like 250%). The two
+    // things that previously broke this at 250%:
+    //   (1) GetNativeWindow() is the CHILD content HWND that fills the client
+    //       area and IS Flutter's logical (0,0) origin — so use it directly, do
+    //       NOT GetAncestor() up to the top-level window (whose client rect is
+    //       offset by the title bar → the cursor lands wrong / jumps).
+    //   (2) The method-channel thread may have a DIFFERENT DPI-awareness context
+    //       than the window. If so, GetClientRect/ClientToScreen return
+    //       DPI-virtualized (logical) coords while SetCursorPos always takes
+    //       PHYSICAL — at 250% that desync flings the cursor to the screen
+    //       corner ("jumps to top"). Pin the thread to per-monitor-aware-v2 for
+    //       these calls so every coordinate is physical and consistent.
+    flutter::FlutterView* view = registrar_->GetView();
+    HWND hwnd = view ? view->GetNativeWindow() : nullptr;
+    // Fall back to the foreground window if the view HWND isn't available (the
+    // app is focused during a drag, so this is our window).
+    if (hwnd == nullptr) hwnd = GetForegroundWindow();
+    if (hwnd != nullptr) {
+      // Pin DPI awareness for the duration of the geometry + warp so all coords
+      // are physical pixels (restored right after). SetThreadDpiAwarenessContext
+      // is Windows 10 1607+; if unavailable the call simply no-ops.
+      DPI_AWARENESS_CONTEXT prevDpi = SetThreadDpiAwarenessContext(
+          DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+      const double lx = GetDouble(*args, "x", 0);
+      const double ly = GetDouble(*args, "y", 0);
+      const double vw = GetDouble(*args, "viewportW", 0);
+      const double vh = GetDouble(*args, "viewportH", 0);
+
+      RECT client = {};
+      if (GetClientRect(hwnd, &client)) {
+        POINT topLeft = {client.left, client.top};
+        POINT botRight = {client.right, client.bottom};
+        ClientToScreen(hwnd, &topLeft);
+        ClientToScreen(hwnd, &botRight);
+        const double pw = static_cast<double>(botRight.x - topLeft.x);
+        const double ph = static_cast<double>(botRight.y - topLeft.y);
+
+        double fx;
+        double fy;
+        if (vw > 0 && vh > 0) {
+          fx = lx / vw;  // fraction across the viewport (0..1)
+          fy = ly / vh;
+        } else {
+          // No viewport sent: assume logical == physical (best effort).
+          fx = pw > 0 ? lx / pw : 0;
+          fy = ph > 0 ? ly / ph : 0;
+        }
+        // Clamp inside the client rect so the cursor can never escape the window
+        // or land on a different monitor, whatever the inputs.
+        if (fx < 0) fx = 0; else if (fx > 1) fx = 1;
+        if (fy < 0) fy = 0; else if (fy > 1) fy = 1;
+
+        const int sx = topLeft.x + static_cast<int>(fx * pw + 0.5);
+        const int sy = topLeft.y + static_cast<int>(fy * ph + 0.5);
+        SetCursorPos(sx, sy);
+      }
+
+      if (prevDpi != nullptr) SetThreadDpiAwarenessContext(prevDpi);
     }
     result->Success();
   } else {
