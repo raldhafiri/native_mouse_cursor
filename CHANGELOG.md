@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- Add **infinite drag** support: `InfiniteDragController` plus the
+  `NativeMouseCursor.warpPointer` / `canWarpPointer` primitives. Drive an
+  unbounded value scrub from your own gesture; works on macOS, Windows, Linux
+  (X11 and Wayland) and the web, falling back to a clamped drag elsewhere. See
+  [doc/infinite_drag.md](doc/infinite_drag.md).
+- Web cursor fix: pre-decode the data-URL cursor bitmaps and skip redundant
+  re-applies, fixing the random "cursor didn't load / blank" flashes in Chrome.
+- Additive only — no breaking changes.
+
 ## 1.0.2
 
 - Add a live web demo (GitHub Pages) plus a demo GIF, live-demo link, and

@@ -61,7 +61,8 @@ class ShowcasePage extends StatefulWidget {
 
 // `NativeMouseCursorMixin` auto-configures the bake DPR and rebuilds when a
 // cursor finishes baking — so the demos can just call `get` from `build`.
-class _ShowcasePageState extends State<ShowcasePage> with NativeMouseCursorMixin {
+class _ShowcasePageState extends State<ShowcasePage>
+    with NativeMouseCursorMixin {
   bool _registered = false;
 
   @override
@@ -87,39 +88,74 @@ class _ShowcasePageState extends State<ShowcasePage> with NativeMouseCursorMixin
     NativeMouseCursor.draw('centre', size: box, painter: _arrow);
 
     // shadow on / off — a natural pointer (tip is the click point).
-    NativeMouseCursor.draw('shadowed', size: box, painter: _arrow, hotspot: tip);
-    NativeMouseCursor.draw('plain',
-        size: box, painter: _arrow, shadow: null, hotspot: tip);
+    NativeMouseCursor.draw(
+      'shadowed',
+      size: box,
+      painter: _arrow,
+      hotspot: tip,
+    );
+    NativeMouseCursor.draw(
+      'plain',
+      size: box,
+      painter: _arrow,
+      shadow: null,
+      hotspot: tip,
+    );
 
     // image — the pointer; the mirroring demo flips it horizontally with flipX.
-    NativeMouseCursor.image('hand', await _arrowImage(64),
-        size: box, hotspot: tip);
+    NativeMouseCursor.image(
+      'hand',
+      await _arrowImage(64),
+      size: box,
+      hotspot: tip,
+    );
 
     // the four source types, side by side (tip hotspot; the builder ring is
     // symmetric so its centre default is fine).
-    NativeMouseCursor.svg('src_svg', 'assets/pointer.svg',
-        size: box, hotspot: tip);
-    NativeMouseCursor.image('src_img', await _arrowImage(64),
-        size: box, hotspot: tip);
-    NativeMouseCursor.draw('src_draw',
-        size: box,
-        painter: (c, s) => _arrow(c, s, fill: const ui.Color(0xFFBBE1FF)),
-        hotspot: tip);
+    NativeMouseCursor.svg(
+      'src_svg',
+      'assets/pointer.svg',
+      size: box,
+      hotspot: tip,
+    );
+    NativeMouseCursor.image(
+      'src_img',
+      await _arrowImage(64),
+      size: box,
+      hotspot: tip,
+    );
+    NativeMouseCursor.draw(
+      'src_draw',
+      size: box,
+      painter: (c, s) => _arrow(c, s, fill: const ui.Color(0xFFBBE1FF)),
+      hotspot: tip,
+    );
     NativeMouseCursor.builder('src_builder', build: _builderCursor);
+
+    // A custom ↔ resize glyph for the infinite-drag demo — a real baked OS
+    // cursor (centre hotspot), shown while dragging the number.
+    NativeMouseCursor.draw(
+      'scrub',
+      size: const ui.Size(28, 20),
+      painter: _scrubArrows,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final modeLabel =
-        widget.force ? 'Overlay' : (kIsWeb ? 'CSS url()' : 'Native OS');
+    final modeLabel = widget.force
+        ? 'Overlay'
+        : (kIsWeb ? 'CSS url()' : 'Native OS');
     return Scaffold(
       backgroundColor: scheme.surfaceContainerLowest,
       appBar: AppBar(
         backgroundColor: scheme.surfaceContainerLowest,
         titleSpacing: 20,
-        title: const Text('native_mouse_cursor',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text(
+          'native_mouse_cursor',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -136,7 +172,8 @@ class _ShowcasePageState extends State<ShowcasePage> with NativeMouseCursorMixin
                 const SizedBox(width: 8),
                 Switch(value: widget.force, onChanged: widget.onForceChanged),
                 const Tooltip(
-                  message: 'Paint the cursor in-app and hide the\n'
+                  message:
+                      'Paint the cursor in-app and hide the\n'
                       'system cursor (web / desktop)',
                   child: Icon(Icons.info_outline, size: 18),
                 ),
@@ -145,64 +182,72 @@ class _ShowcasePageState extends State<ShowcasePage> with NativeMouseCursorMixin
           ),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8, top: 4),
-                child: Text(
-                  'Real OS mouse cursors from your own glyphs. Hover each demo.',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              _DemoCard(
-                icon: Icons.rotate_right,
-                title: 'Rotation',
-                description:
-                    'One get(id, angle:) call — the arrow rotates to aim at the '
-                    'dot. Each angle is baked once and cached.',
-                child: _RotationDemo(),
-              ),
-              _DemoCard(
-                icon: Icons.flip,
-                title: 'Mirroring',
-                description:
-                    'Move between quadrants — flipX / flipY mirror one registered '
-                    'glyph on demand (no second asset). The tip stays on the '
-                    'pointer.',
-                child: _MirrorDemo(),
-              ),
-              _DemoCard(
-                icon: Icons.my_location,
-                title: 'Hotspot',
-                description:
-                    'The red dot marks the true pointer position — i.e. the '
-                    'hotspot. Same glyph, two hotspots: see it at the tip vs the '
-                    'centre.',
-                child: _HotspotDemo(),
-              ),
-              _DemoCard(
-                icon: Icons.contrast,
-                title: 'Baked drop shadow',
-                description:
-                    'A CSS-style shadow baked into the bitmap — rock-steady '
-                    'at every angle, never shimmering.',
-                child: _ShadowDemo(),
-              ),
-              _DemoCard(
-                icon: Icons.category_outlined,
-                title: 'Cursor sources',
-                description:
-                    'Register a glyph from an SVG, a ui.Image, a painter, or a '
-                    'custom per-angle builder.',
-                child: _SourcesDemo(),
-              ),
-            ],
+      // Fill the window width — no centered max-width column, which left
+      // annoying empty gaps on the left and right of the scroll area on a wide
+      // window. Comfortable side padding keeps the cards off the edges.
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, top: 4),
+            child: Text(
+              'Real OS mouse cursors from your own glyphs. Hover each demo.',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
           ),
-        ),
+          _DemoCard(
+            icon: Icons.rotate_right,
+            title: 'Rotation',
+            description:
+                'One get(id, angle:) call — the arrow rotates to aim at the '
+                'dot. Each angle is baked once and cached.',
+            child: _RotationDemo(),
+          ),
+          _DemoCard(
+            icon: Icons.flip,
+            title: 'Mirroring',
+            description:
+                'Move between quadrants — flipX / flipY mirror one registered '
+                'glyph on demand (no second asset). The tip stays on the '
+                'pointer.',
+            child: _MirrorDemo(),
+          ),
+          _DemoCard(
+            icon: Icons.my_location,
+            title: 'Hotspot',
+            description:
+                'The red dot marks the true pointer position — i.e. the '
+                'hotspot. Same glyph, two hotspots: see it at the tip vs the '
+                'centre.',
+            child: _HotspotDemo(),
+          ),
+          _DemoCard(
+            icon: Icons.contrast,
+            title: 'Baked drop shadow',
+            description:
+                'A CSS-style shadow baked into the bitmap — rock-steady '
+                'at every angle, never shimmering.',
+            child: _ShadowDemo(),
+          ),
+          _DemoCard(
+            icon: Icons.category_outlined,
+            title: 'Cursor sources',
+            description:
+                'Register a glyph from an SVG, a ui.Image, a painter, or a '
+                'custom per-angle builder.',
+            child: _SourcesDemo(),
+          ),
+          _DemoCard(
+            icon: Icons.swap_horiz,
+            title: 'Infinite drag',
+            description:
+                'Drag the number left/right to change it. The pointer WRAPS at '
+                'the window edge (macOS / Windows / Linux-X11) so the drag never '
+                'runs out of room. On web / Wayland it uses pointer lock. One '
+                'InfiniteDragController does all the per-OS math.',
+            child: _ScrubDemo(),
+          ),
+        ],
       ),
     );
   }
@@ -225,16 +270,24 @@ class _RotationDemoState extends State<_RotationDemo> {
       child: LayoutBuilder(
         builder: (context, c) {
           final center = Offset(c.maxWidth / 2, c.maxHeight / 2);
+          // Turn the pointer so its tip aims from the cursor at the dot.
+          void aim(Offset local) {
+            final d = center - local;
+            setState(() => _angle = math.atan2(d.dy, d.dx) - _arrowForward);
+          }
+
           return MouseRegion(
             cursor: NativeMouseCursor.get('rotate', angle: _angle),
-            onHover: (e) {
-              // Turn the pointer so its tip aims from the cursor at the dot.
-              final d = center - e.localPosition;
-              setState(() => _angle = math.atan2(d.dy, d.dx) - _arrowForward);
-            },
-            child: CustomPaint(
-              painter: _DotPainter(Theme.of(context).colorScheme.primary),
-              child: const SizedBox.expand(),
+            // onHover only fires while NO button is pressed. Pair it with a
+            // Listener.onPointerMove so the cursor keeps aiming even while a
+            // button is held down (otherwise the angle freezes on press).
+            onHover: (e) => aim(e.localPosition),
+            child: Listener(
+              onPointerMove: (e) => aim(e.localPosition),
+              child: CustomPaint(
+                painter: _DotPainter(Theme.of(context).colorScheme.primary),
+                child: const SizedBox.expand(),
+              ),
             ),
           );
         },
@@ -260,41 +313,50 @@ class _MirrorDemoState extends State<_MirrorDemo> {
       child: LayoutBuilder(
         builder: (context, c) {
           final center = Offset(c.maxWidth / 2, c.maxHeight / 2);
+          // Pick the flip from which quadrant the pointer is in.
+          void update(Offset local) {
+            final fx = local.dx > center.dx; // right half
+            final fy = local.dy > center.dy; // bottom half
+            if (fx != _flipX || fy != _flipY) {
+              setState(() {
+                _flipX = fx;
+                _flipY = fy;
+              });
+            }
+          }
+
           return MouseRegion(
-            cursor:
-                NativeMouseCursor.get('hand', flipX: _flipX, flipY: _flipY),
-            onHover: (e) {
-              final fx = e.localPosition.dx > center.dx; // right half
-              final fy = e.localPosition.dy > center.dy; // bottom half
-              if (fx != _flipX || fy != _flipY) {
-                setState(() {
-                  _flipX = fx;
-                  _flipY = fy;
-                });
-              }
-            },
-            child: Column(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Expanded(child: _cell('—', !_flipX && !_flipY)),
-                      VerticalDivider(width: 1, color: divider),
-                      Expanded(child: _cell('flipX', _flipX && !_flipY)),
-                    ],
+            cursor: NativeMouseCursor.get('hand', flipX: _flipX, flipY: _flipY),
+            // onHover fires only with no button pressed; pair with onPointerMove
+            // so it still works while a button is held.
+            onHover: (e) => update(e.localPosition),
+            child: Listener(
+              onPointerMove: (e) => update(e.localPosition),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _cell('—', !_flipX && !_flipY)),
+                        VerticalDivider(width: 1, color: divider),
+                        Expanded(child: _cell('flipX', _flipX && !_flipY)),
+                      ],
+                    ),
                   ),
-                ),
-                Divider(height: 1, color: divider),
-                Expanded(
-                  child: Row(
-                    children: [
-                      Expanded(child: _cell('flipY', !_flipX && _flipY)),
-                      VerticalDivider(width: 1, color: divider),
-                      Expanded(child: _cell('flipX · flipY', _flipX && _flipY)),
-                    ],
+                  Divider(height: 1, color: divider),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _cell('flipY', !_flipX && _flipY)),
+                        VerticalDivider(width: 1, color: divider),
+                        Expanded(
+                          child: _cell('flipX · flipY', _flipX && _flipY),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -326,10 +388,13 @@ class _HotspotDemo extends StatelessWidget {
       height: 150,
       child: Row(
         children: [
-          Expanded(child: _HotspotTarget(label: 'tip hotspot', id: 'tip')),
+          Expanded(
+            child: _HotspotTarget(label: 'tip hotspot', id: 'tip'),
+          ),
           const SizedBox(width: 12),
           Expanded(
-              child: _HotspotTarget(label: 'centre hotspot', id: 'centre')),
+            child: _HotspotTarget(label: 'centre hotspot', id: 'centre'),
+          ),
         ],
       ),
     );
@@ -354,30 +419,38 @@ class _HotspotTargetState extends State<_HotspotTarget> {
       height: 150,
       child: MouseRegion(
         cursor: NativeMouseCursor.get(widget.id),
+        // onHover fires only with no button pressed; pair with onPointerMove so
+        // the red dot tracks the pointer even while a button is held.
         onHover: (e) => setState(() => _pointer = e.localPosition),
         onExit: (e) => setState(() => _pointer = null),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            CustomPaint(
-              painter: _PointerDotPainter(_pointer),
-              child: const SizedBox.expand(),
-            ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(widget.label,
-                    style: Theme.of(context).textTheme.bodySmall),
+        child: Listener(
+          onPointerMove: (e) => setState(() => _pointer = e.localPosition),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                painter: _PointerDotPainter(_pointer),
+                child: const SizedBox.expand(),
               ),
-            ),
-            if (_pointer == null)
-              Text('hover here',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: Colors.black38)),
-          ],
+              Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    widget.label,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
+              if (_pointer == null)
+                Text(
+                  'hover here',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.black38),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -391,9 +464,13 @@ class _ShadowDemo extends StatelessWidget {
       height: 120,
       child: Row(
         children: [
-          Expanded(child: _Swatch(label: 'with shadow', id: 'shadowed')),
+          Expanded(
+            child: _Swatch(label: 'with shadow', id: 'shadowed'),
+          ),
           const SizedBox(width: 12),
-          Expanded(child: _Swatch(label: 'no shadow', id: 'plain')),
+          Expanded(
+            child: _Swatch(label: 'no shadow', id: 'plain'),
+          ),
         ],
       ),
     );
@@ -415,12 +492,194 @@ class _SourcesDemo extends StatelessWidget {
         children: [
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) const SizedBox(width: 10),
-            Expanded(child: _Swatch(label: items[i].$1, id: items[i].$2)),
+            Expanded(
+              child: _Swatch(label: items[i].$1, id: items[i].$2),
+            ),
           ],
         ],
       ),
     );
   }
+}
+
+/// Infinite-drag demo: drag the big number to change it. The pointer wraps at
+/// the window edge (desktop) / pointer-locks (web) via [InfiniteDragController],
+/// so a value can be dragged arbitrarily far without the cursor leaving the app.
+class _ScrubDemo extends StatefulWidget {
+  @override
+  State<_ScrubDemo> createState() => _ScrubDemoState();
+}
+
+class _ScrubDemoState extends State<_ScrubDemo> {
+  final InfiniteDragController _drag = InfiniteDragController();
+  double _value = 50;
+  double _raw = 50; // fractional accumulator; the label shows the rounded int
+  bool _scrubbing = false;
+  bool _warp = false; // whether warping is available on this host (post-start)
+
+  // While scrubbing, a full-screen overlay LOCKS the custom ↔ cursor across the
+  // whole app — so when the edge warp teleports the pointer off the number, the
+  // cursor stays the scrub glyph instead of reverting to whatever region it
+  // lands on. (On web, pointer-lock hides the cursor instead.)
+  OverlayEntry? _cursorLock;
+
+  void _lockScrubCursor() {
+    if (_cursorLock != null) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    _cursorLock = OverlayEntry(
+      builder: (_) => Positioned.fill(
+        child: MouseRegion(
+          cursor: NativeMouseCursor.get(
+            'scrub',
+            fallback: SystemMouseCursors.resizeLeftRight,
+          ),
+          opaque: false,
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+    overlay.insert(_cursorLock!);
+  }
+
+  void _unlockScrubCursor() {
+    _cursorLock?.remove();
+    _cursorLock = null;
+  }
+
+  // Apply one scrub step; shared by the warp path (update) and lock path
+  // (onLockedDelta) so both behave the same.
+  void _applyScrub(double dx) {
+    if (!mounted || dx == 0) return;
+    setState(() {
+      _raw += dx * 0.25; // 0.25 units per logical px
+      _value = _raw.roundToDouble();
+    });
+  }
+
+  @override
+  void dispose() {
+    _unlockScrubCursor();
+    _drag.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return _Stage(
+      height: 180,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            MouseRegion(
+              // The custom baked ↔ scrub cursor (falls back to the system resize
+              // cursor until it's baked / where bitmaps aren't supported).
+              cursor: NativeMouseCursor.get(
+                'scrub',
+                fallback: SystemMouseCursors.resizeLeftRight,
+              ),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: (d) async {
+                  setState(() => _scrubbing = true);
+                  _raw = _value;
+                  _lockScrubCursor(); // keep ↔ locked across edge warps
+                  // onLockedDelta drives the value on the LOCK path (web /
+                  // Wayland) where Flutter's drag updates go silent.
+                  await _drag.start(
+                    d.globalPosition,
+                    onLockedDelta: (delta) => _applyScrub(delta.dx),
+                  );
+                  if (mounted) setState(() => _warp = _drag.warpAvailable);
+                },
+                onHorizontalDragUpdate: (d) async {
+                  final dx = await _drag.update(
+                    globalPosition: d.globalPosition,
+                    delta: d.delta,
+                    viewportSize: MediaQuery.sizeOf(context),
+                  );
+                  if (dx != 0) _applyScrub(dx);
+                },
+                onHorizontalDragEnd: (_) {
+                  _drag.end();
+                  _unlockScrubCursor();
+                  if (mounted) setState(() => _scrubbing = false);
+                },
+                onHorizontalDragCancel: () {
+                  _drag.cancel();
+                  _unlockScrubCursor();
+                  if (mounted) setState(() => _scrubbing = false);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 28,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    _value.toInt().toString(),
+                    style: TextStyle(
+                      fontSize: 64,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: _scrubbing ? scheme.primary : scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _scrubbing
+                  ? (_warp ? 'wrapping at the edge…' : 'pointer-locked…')
+                  : '← drag the number →',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Paints a horizontal double-headed (↔) scrub arrow into a [size] box as ONE
+/// combined outline: a thin centre bar with a triangular arrowhead at each end,
+/// traced as a single closed path so it fills + strokes as one clean shape.
+void _scrubArrows(ui.Canvas canvas, ui.Size size) {
+  final w = size.width, h = size.height;
+  final cy = h / 2;
+  final head = w * 0.30; // arrowhead length (each side)
+  final ah = h * 0.46; // arrowhead half-height (the wide tip)
+  final bar = h * 0.16; // shaft half-thickness
+
+  // Trace the silhouette clockwise from the left tip: out to the top of the
+  // left head, in to the bar, across the top of the bar, out to the top of the
+  // right head, around the right tip, and symmetrically back along the bottom.
+  final path = ui.Path()
+    ..moveTo(0, cy) // left tip
+    ..lineTo(head, cy - ah) // up the left head
+    ..lineTo(head, cy - bar) // in to the shaft (top)
+    ..lineTo(w - head, cy - bar) // across the shaft top
+    ..lineTo(w - head, cy - ah) // out to the right head top
+    ..lineTo(w, cy) // right tip
+    ..lineTo(w - head, cy + ah) // down the right head
+    ..lineTo(w - head, cy + bar) // in to the shaft (bottom)
+    ..lineTo(head, cy + bar) // back across the shaft bottom
+    ..lineTo(head, cy + ah) // out to the left head bottom
+    ..close();
+
+  canvas.drawPath(path, ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+  canvas.drawPath(
+    path,
+    ui.Paint()
+      ..color = const ui.Color(0xFF1A1A1A)
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = h * 0.10
+      ..strokeJoin = ui.StrokeJoin.round,
+  );
 }
 
 // ──────────────────────────────── building blocks ────────────────────────────
@@ -459,9 +718,13 @@ class _DemoCard extends StatelessWidget {
               children: [
                 Icon(icon, size: 20, color: scheme.primary),
                 const SizedBox(width: 8),
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 17, fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 6),
@@ -513,11 +776,15 @@ class _Swatch extends StatelessWidget {
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
         child: Center(
-          child: Text(label,
-              style: const TextStyle(fontWeight: FontWeight.w600)),
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
         ),
       ),
     );
@@ -534,12 +801,13 @@ class _DotPainter extends CustomPainter {
     final center = size.center(Offset.zero);
     canvas.drawCircle(center, 9, Paint()..color = color);
     canvas.drawCircle(
-        center,
-        17,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = color.withValues(alpha: 0.35));
+      center,
+      17,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = color.withValues(alpha: 0.35),
+    );
   }
 
   @override
@@ -583,12 +851,14 @@ const _arrowOutline = <ui.Offset>[
 
 // The angle the tip points at rotation 0 (from the box centre), so the rotation
 // demo can turn it to aim anywhere.
-final double _arrowForward =
-    math.atan2(_arrowTip.dy - 0.5, _arrowTip.dx - 0.5);
+final double _arrowForward = math.atan2(_arrowTip.dy - 0.5, _arrowTip.dx - 0.5);
 
 /// Paints the pointer into a [size]-logical box.
-void _arrow(ui.Canvas canvas, ui.Size size,
-    {ui.Color fill = const ui.Color(0xFFFFFFFF)}) {
+void _arrow(
+  ui.Canvas canvas,
+  ui.Size size, {
+  ui.Color fill = const ui.Color(0xFFFFFFFF),
+}) {
   final w = size.width, h = size.height;
   final path = ui.Path()
     ..moveTo(_arrowOutline.first.dx * w, _arrowOutline.first.dy * h);
@@ -623,7 +893,10 @@ Future<ui.Image> _builderCursor(double angle, double dpr) {
   final canvas = ui.Canvas(recorder)..scale(dpr);
   const center = ui.Offset(logical / 2, logical / 2);
   canvas.drawCircle(
-      center, logical * 0.42, ui.Paint()..color = const ui.Color(0xFF7E57C2));
+    center,
+    logical * 0.42,
+    ui.Paint()..color = const ui.Color(0xFF7E57C2),
+  );
   canvas.drawCircle(
     center,
     logical * 0.42,
