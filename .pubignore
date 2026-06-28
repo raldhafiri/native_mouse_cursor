@@ -1,3 +1,18 @@
+# NOTE: when a .pubignore exists, pub uses it INSTEAD of .gitignore — so the
+# build/tool artifacts that .gitignore normally excludes must be listed here too,
+# otherwise they get published (e.g. multi-MB build caches).
+
 # GitHub-only social card (not referenced by the README on pub.dev).
 doc/social_preview.png
 doc/social_preview.svg
+
+# Build output & tooling caches (never publish).
+build/
+.dart_tool/
+.build/
+example/build/
+example/.dart_tool/
+*.iml
+.idea/
+.flutter-plugins
+.flutter-plugins-dependencies
