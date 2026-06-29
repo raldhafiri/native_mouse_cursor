@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/widgets.dart';
 
 import '../native_mouse_cursor.dart';
@@ -43,6 +44,7 @@ class InfiniteDragRegion extends StatefulWidget {
     this.onActiveChanged,
     this.axis = InfiniteDragAxis.horizontal,
     this.cursor,
+    this.supportedDevices,
   });
 
   /// The draggable content.
@@ -69,6 +71,13 @@ class InfiniteDragRegion extends StatefulWidget {
   /// the drag. Provide one to show — and, on desktop, **pin across the edge
   /// warps** — a specific cursor.
   final MouseCursor? cursor;
+
+  /// Pointer device kinds allowed to start the drag — forwarded to the internal
+  /// gesture recognizer's `supportedDevices`. Null (default) = all kinds. Pass a
+  /// set WITHOUT [PointerDeviceKind.trackpad] to stop a trackpad / Magic-Mouse
+  /// two-finger pan from triggering a scrub (so panning over the control scrolls
+  /// instead). Ignored on Firefox web, which engages via a native click.
+  final Set<PointerDeviceKind>? supportedDevices;
 
   @override
   State<InfiniteDragRegion> createState() => _InfiniteDragRegionState();
@@ -219,6 +228,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
       case InfiniteDragAxis.horizontal:
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          supportedDevices: widget.supportedDevices,
           onHorizontalDragStart: (d) => _onStart(d.globalPosition),
           onHorizontalDragUpdate: (d) => _onUpdate(d.globalPosition, d.delta),
           onHorizontalDragEnd: (_) => _onEnd(),
@@ -228,6 +238,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
       case InfiniteDragAxis.vertical:
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          supportedDevices: widget.supportedDevices,
           onVerticalDragStart: (d) => _onStart(d.globalPosition),
           onVerticalDragUpdate: (d) => _onUpdate(d.globalPosition, d.delta),
           onVerticalDragEnd: (_) => _onEnd(),
@@ -237,6 +248,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
       case InfiniteDragAxis.both:
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          supportedDevices: widget.supportedDevices,
           onPanStart: (d) => _onStart(d.globalPosition),
           onPanUpdate: (d) => _onUpdate(d.globalPosition, d.delta),
           onPanEnd: (_) => _onEnd(),

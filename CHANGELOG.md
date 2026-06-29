@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- `InfiniteDragRegion` gains a **`supportedDevices`** parameter (forwarded to the
+  internal gesture recognizer) — pass a set without `PointerDeviceKind.trackpad`
+  to stop a trackpad / Magic-Mouse two-finger pan from triggering a scrub.
+- Additive — no breaking changes.
+
 ## 1.2.0
 
 - Add **`InfiniteDragRegion`** — infinite drag in one widget; picks the right
