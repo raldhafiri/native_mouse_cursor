@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0
 
 - Add **`InfiniteDragRegion`** — infinite drag in one widget. Wraps any handle
   and picks the right model per target automatically (desktop edge-warp, web
