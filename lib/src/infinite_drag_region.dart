@@ -42,7 +42,7 @@ class InfiniteDragRegion extends StatefulWidget {
     required this.onScrub,
     this.onActiveChanged,
     this.axis = InfiniteDragAxis.horizontal,
-    this.cursor = MouseCursor.defer,
+    this.cursor,
   });
 
   /// The draggable content.
@@ -62,9 +62,13 @@ class InfiniteDragRegion extends StatefulWidget {
   /// `NativeMouseCursor.get('scrub', fallback: SystemMouseCursors.resizeLeftRight)`.
   /// When it resolves to a [NativeMouseCursor], that baked glyph is also painted
   /// as the wrapping cursor on web while the pointer is locked (and hidden), so
-  /// it never leaves the viewport. Any other [MouseCursor] just sets the region
-  /// cursor.
-  final MouseCursor cursor;
+  /// it never leaves the viewport.
+  ///
+  /// Leave it `null` (the default) to keep whatever cursor is already in effect:
+  /// the region defers to the ambient / child cursor and nothing is pinned during
+  /// the drag. Provide one to show — and, on desktop, **pin across the edge
+  /// warps** — a specific cursor.
+  final MouseCursor? cursor;
 
   @override
   State<InfiniteDragRegion> createState() => _InfiniteDragRegionState();
@@ -75,6 +79,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
     axis: widget.axis,
   );
   DragCursorOverlay? _cursor;
+  OverlayEntry? _cursorLock; // app-wide cursor pin while warping
   Offset _wrapPos = Offset.zero;
 
   // Firefox can't lock on a press (pointerdown) — it uses a native click toggle.
@@ -98,6 +103,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
   void dispose() {
     if (_firefoxWeb) _drag.stopScrub();
     _hideWrapCursor();
+    _unlockAppCursor();
     _drag.dispose();
     super.dispose();
   }
@@ -123,6 +129,35 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
     _cursor = null;
   }
 
+  // While WARPING (desktop / Wayland-warp), the OS pointer jumps to the opposite
+  // edge — landing on a different widget, which would otherwise flip the cursor
+  // to that region's (the system default). Pin [cursor] across the whole app for
+  // the duration of the drag so it stays put through every warp. Harmless on the
+  // lock path (the real cursor is hidden there); opaque:false lets the drag
+  // events fall through to the widgets underneath.
+  void _lockAppCursor() {
+    // No explicit cursor → nothing to pin; leave the ambient/child cursor as-is.
+    final cursor = widget.cursor;
+    if (cursor == null || _cursorLock != null || !mounted) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    _cursorLock = OverlayEntry(
+      builder: (_) => Positioned.fill(
+        child: MouseRegion(
+          cursor: cursor,
+          opaque: false,
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+    overlay.insert(_cursorLock!);
+  }
+
+  void _unlockAppCursor() {
+    _cursorLock?.remove();
+    _cursorLock = null;
+  }
+
   void _advanceWrapCursor(Offset d) {
     if (_cursor == null || !mounted) return;
     _wrapPos = InfiniteDragController.wrapPosition(
@@ -137,6 +172,7 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
   // Press-drag (web Chrome/Safari/Edge) + warp (desktop).
   Future<void> _onStart(Offset globalPosition) async {
     widget.onActiveChanged?.call(true);
+    _lockAppCursor(); // keep the cursor put across edge warps
     _showWrapCursor();
     await _drag.start(
       globalPosition,
@@ -159,13 +195,14 @@ class _InfiniteDragRegionState extends State<InfiniteDragRegion> {
   void _onEnd() {
     _drag.end();
     _hideWrapCursor();
+    _unlockAppCursor();
     widget.onActiveChanged?.call(false);
   }
 
   @override
   Widget build(BuildContext context) {
     final region = MouseRegion(
-      cursor: widget.cursor,
+      cursor: widget.cursor ?? MouseCursor.defer,
       // Arm the web lock while hovering, so a press/click here engages a scrub.
       onEnter: (_) => _drag.armPointerLock(true),
       onExit: (_) => _drag.armPointerLock(false),

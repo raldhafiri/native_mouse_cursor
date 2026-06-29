@@ -103,6 +103,28 @@ if(WAYLAND_CLIENT_FOUND)
       "${_gen}/relative-pointer-unstable-v1-protocol.c")
     target_include_directories(${PLUGIN_NAME} PRIVATE "${_gen}")
     target_compile_definitions(${PLUGIN_NAME} PRIVATE NMC_WAYLAND_HAVE_PROTOCOLS)
+
+    # Pointer-warp (wp_pointer_warp_v1, staging — wayland-protocols >= 1.45) is
+    # too new to require from the host's pkgdatadir, so we VENDOR its XML in
+    # linux/wayland_protocols/ and scan that. Same model: compile only the
+    # generated DATA table, marshal via the dlsym'd wl_proxy_marshal_flags.
+    # Independent NMC_WAYLAND_HAVE_WARP guard so the build still works (lock-only)
+    # if the vendored XML is removed; runtime still gates on the compositor
+    # actually advertising the global.
+    set(_pw_xml "${CMAKE_CURRENT_SOURCE_DIR}/wayland_protocols/pointer-warp-v1.xml")
+    if(EXISTS "${_pw_xml}")
+      add_custom_command(
+        OUTPUT "${_gen}/pointer-warp-v1-protocol.c"
+               "${_gen}/pointer-warp-v1-client-protocol.h"
+        COMMAND ${WAYLAND_SCANNER} private-code "${_pw_xml}"
+                "${_gen}/pointer-warp-v1-protocol.c"
+        COMMAND ${WAYLAND_SCANNER} client-header "${_pw_xml}"
+                "${_gen}/pointer-warp-v1-client-protocol.h"
+        DEPENDS "${_pw_xml}" VERBATIM)
+      target_sources(${PLUGIN_NAME} PRIVATE
+        "${_gen}/pointer-warp-v1-protocol.c")
+      target_compile_definitions(${PLUGIN_NAME} PRIVATE NMC_WAYLAND_HAVE_WARP)
+    endif()
   endif()
 endif()
 
