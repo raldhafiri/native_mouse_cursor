@@ -224,18 +224,17 @@ InfiniteDragRegion(
 );
 ```
 
-That single widget picks the right mechanism automatically:
+### Platform mechanism
 
-- **desktop** — the OS pointer **warps** at the window edge (visible, wraps).
-- **web — Chrome / Safari / Edge** — **press-drag** via Pointer Lock.
-- **web — Firefox** — **click-to-engage** via Pointer Lock (Firefox only grants a
-  lock from a `click`): click the handle to start scrubbing, move, click / Esc to
-  stop.
-- **mobile** — ordinary clamped drag.
-
-On web, while the pointer is locked the real cursor is hidden, so the baked
-`cursor` is painted **wrapping** around the viewport instead — it never leaves the
-screen.
+`InfiniteDragRegion` uses one of two models, chosen per platform via
+`canWarpPointer()`. On **macOS, Windows and Linux** — X11, and Wayland on modern
+compositors — it **warps**: the OS teleports the *visible* cursor back from the
+edge while your drag events drive the value. On the **web** and on **older
+Wayland** compositors it **locks**: the pointer is hidden/frozen and an unbounded
+relative-motion stream drives the value, with a painted cursor wrapping the
+viewport (on Firefox the lock engages on a `click`). **Mobile** has neither, so
+the drag simply stops at the edge. A single Linux build serves both X11 and
+Wayland.
 
 ### Lower-level control
 
@@ -264,17 +263,15 @@ GestureDetector(
 
 > 💡 That snippet is the desktop **warp** path. The lock-based paths (web,
 > Wayland) and Firefox's click-to-engage are exactly what `InfiniteDragRegion`
-> wires up for you — see [doc/infinite_drag.md](doc/infinite_drag.md) if you need
-> to do it by hand.
+> wires up for you.
 
 The low-level primitive is also public: `NativeMouseCursor.warpPointer(x, y)`
 teleports the OS pointer to logical window coords, and
 `NativeMouseCursor.canWarpPointer()` reports whether the host supports it.
 
-Works on macOS, Windows, Linux (X11 **and** Wayland) and the web. For the
-per-platform mechanisms, the Firefox click-to-engage model, the Wayland lock
-approach and the build requirements, see
-**[doc/infinite_drag.md](doc/infinite_drag.md)**.
+Works on macOS, Windows, Linux and the web. For the exact per-platform
+APIs/protocols, the Firefox click-to-engage model and the Linux build
+requirements, see **[doc/infinite_drag.md](doc/infinite_drag.md)**.
 
 ## 🖌️ Painted overlay (web / desktop)
 

@@ -6,6 +6,12 @@ import FlutterMacOS
 
 public class NativeMouseCursorPlugin: NSObject, FlutterPlugin {
   private var cursors = [String: NSCursor]()
+  // The cursor most recently applied via `setCursor`, re-asserted after a warp.
+  // CGWarpMouseCursorPosition emits NO mouse-moved event, so Flutter's
+  // MouseTracker doesn't re-evaluate the cursor at the warp target and a custom
+  // NSCursor can revert to the system arrow there. Re-setting it ourselves right
+  // after the warp keeps the custom cursor visible across the edge wrap.
+  private var currentCursor: NSCursor?
   // The plugin registrar — kept so pointer warping can reach the host view to
   // convert Flutter-logical coords → screen coords.
   private weak var registrar: FlutterPluginRegistrar?
@@ -53,6 +59,7 @@ public class NativeMouseCursorPlugin: NSObject, FlutterPlugin {
         result(nil)
         return
       }
+      currentCursor = cursor
       cursor.set()
       result(nil)
 
@@ -103,6 +110,10 @@ public class NativeMouseCursorPlugin: NSObject, FlutterPlugin {
       // Re-link the hardware mouse to the cursor immediately (CGWarp briefly
       // dissociates them), so the very next move isn't swallowed.
       CGAssociateMouseAndMouseCursorPosition(1)
+      // CGWarp emits no mouse-moved event, so Flutter won't re-apply the cursor
+      // at the warp target — re-assert the current custom cursor ourselves so it
+      // stays visible across the edge wrap instead of reverting to the arrow.
+      currentCursor?.set()
       result(nil)
 
     default:

@@ -50,6 +50,17 @@
 #define NMC_WAYLAND_RUNTIME 1
 #endif
 
+// wp_pointer_warp_v1 (staging): true OS pointer warp on Wayland where the
+// compositor advertises it (GNOME 49+, Plasma 6.5+, Hyprland 0.51+, …), giving a
+// VISIBLE wrapping cursor like X11/macOS/Windows instead of the hidden/frozen
+// lock. Layered ON TOP of the lock path (which stays as the fallback). The XML
+// is vendored (it's too new for most hosts' pkgdatadir); CMake sets
+// NMC_WAYLAND_HAVE_WARP when its glue was generated.
+#if defined(NMC_WAYLAND_RUNTIME) && defined(NMC_WAYLAND_HAVE_WARP)
+#include "pointer-warp-v1-client-protocol.h"
+#define NMC_WAYLAND_WARP 1
+#endif
+
 #include <cstdint>
 #include <cstring>
 
@@ -66,6 +77,18 @@ struct _NmcPointer {
   void* wl_relative_pointer;  // zwp_relative_pointer_v1* (per-lock)
   double wl_rel_dx;           // accumulated relative motion (logical px)
   double wl_rel_dy;
+
+  // Wayland pointer-warp (wp_pointer_warp_v1). Preferred over the lock above when
+  // the compositor advertises it. We bind the warp global plus our OWN wl_seat /
+  // wl_pointer — GDK's wl_pointer already has a listener and libwayland allows
+  // only one per proxy — purely to capture the wl_pointer.enter serial + focus
+  // that warp_pointer requires. All cached once.
+  void* wl_warp;            // wp_pointer_warp_v1*
+  void* wl_warp_seat;       // wl_seat* (ours)
+  void* wl_warp_pointer;    // wl_pointer* (ours; our listener's target)
+  uint32_t wl_warp_serial;  // latest wl_pointer.enter serial (warp needs this)
+  bool wl_warp_focused;     // our pointer is currently over one of our surfaces
+  bool wl_warp_tried;       // one-time setup attempted
 };
 
 static double value_to_double(FlValue* v, double fallback) {
@@ -108,63 +131,6 @@ static XFlushFn nmc_x_flush() {
   return fn;
 }
 #endif
-
-FlMethodResponse* nmc_pointer_can_warp(NmcPointer* self) {
-  bool ok = false;
-#ifdef NMC_X11_RUNTIME
-  GdkDisplay* display = gdk_display_get_default();
-  if (display != nullptr && GDK_IS_X11_DISPLAY(display) &&
-      nmc_x_warp() != nullptr) {
-    ok = true;
-  }
-#endif
-  (void)self;
-  return FL_METHOD_RESPONSE(
-      fl_method_success_response_new(fl_value_new_bool(ok)));
-}
-
-FlMethodResponse* nmc_pointer_warp(NmcPointer* self, FlValue* args) {
-#ifdef NMC_X11_RUNTIME
-  GdkDisplay* display = gdk_display_get_default();
-  XWarpPointerFn warp = nmc_x_warp();
-  FlView* view = self->registrar
-                     ? fl_plugin_registrar_get_view(self->registrar)
-                     : nullptr;
-  if (display != nullptr && GDK_IS_X11_DISPLAY(display) && warp != nullptr &&
-      view != nullptr) {
-    double lx = value_to_double(fl_value_lookup_string(args, "x"), 0);
-    double ly = value_to_double(fl_value_lookup_string(args, "y"), 0);
-    GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(view));
-    if (window != nullptr) {
-      // x/y are Flutter-LOGICAL coords relative to the FlView (top-left,
-      // y-down). Map to root (screen) X11 pixels. We anchor on the FlVIEW's own
-      // window origin — NOT the toplevel's — because the toplevel origin can be
-      // offset by window decorations / a header bar, which made the warp land
-      // wrong vertically ("jump to top"). If the view shares the toplevel's
-      // window (no native subwindow), add the view's allocation offset so (0,0)
-      // still maps to the view's top-left.
-      gint scale = gdk_window_get_scale_factor(window);
-      gint ox = 0, oy = 0;
-      gdk_window_get_origin(window, &ox, &oy);
-      GtkAllocation alloc = {};
-      gtk_widget_get_allocation(GTK_WIDGET(view), &alloc);
-      if (!gtk_widget_get_has_window(GTK_WIDGET(view))) {
-        ox += alloc.x * scale;
-        oy += alloc.y * scale;
-      }
-      Display* xdisplay = GDK_DISPLAY_XDISPLAY(display);
-      ::Window root = DefaultRootWindow(xdisplay);
-      int rx = ox + static_cast<int>(lx * scale + 0.5);
-      int ry = oy + static_cast<int>(ly * scale + 0.5);
-      warp(xdisplay, None, root, 0, 0, 0, 0, rx, ry);
-      if (XFlushFn flush = nmc_x_flush()) flush(xdisplay);
-    }
-  }
-#endif
-  (void)self;
-  (void)args;
-  return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
-}
 
 // ───────────────────────────── Wayland lock pointer ─────────────────────────
 #ifdef NMC_WAYLAND_RUNTIME
@@ -435,7 +401,260 @@ static struct wl_proxy* nmc_wl_bind(struct wl_display* dpy, const char* name,
   return target.result;
 }
 
+// ─────────────────────────── Wayland pointer warp ───────────────────────────
+#ifdef NMC_WAYLAND_WARP
+namespace nmc_wl {
+
+// Core wl_seat / wl_pointer interface descriptors live in libwayland-client (NOT
+// our generated glue), so — like registry_iface() — resolve them at runtime
+// instead of referencing the extern symbols (which we don't link).
+static const struct wl_interface* seat_iface() {
+  void* p = dlsym(RTLD_DEFAULT, "wl_seat_interface");
+  if (p == nullptr && wl_handle() != nullptr) {
+    p = dlsym(wl_handle(), "wl_seat_interface");
+  }
+  return reinterpret_cast<const struct wl_interface*>(p);
+}
+static const struct wl_interface* pointer_iface() {
+  void* p = dlsym(RTLD_DEFAULT, "wl_pointer_interface");
+  if (p == nullptr && wl_handle() != nullptr) {
+    p = dlsym(wl_handle(), "wl_pointer_interface");
+  }
+  return reinterpret_cast<const struct wl_interface*>(p);
+}
+
+// A constructing request with NO non-id args: wl_seat.get_pointer(new_id).
+static struct wl_proxy* construct0(struct wl_proxy* proxy, uint32_t opcode,
+                                   const struct wl_interface* new_iface) {
+  if (marshal_flags()) {
+    return marshal_flags()(proxy, opcode, new_iface, get_version()(proxy), 0,
+                           nullptr);
+  }
+  if (marshal_constructor()) {
+    return marshal_constructor()(proxy, opcode, new_iface, nullptr);
+  }
+  return nullptr;
+}
+
+// wp_pointer_warp_v1.warp_pointer(surface, pointer, x, y, serial) — neither
+// constructing nor destroying, so no new_id and no DESTROY flag.
+static void warp_request(struct wl_proxy* warp, void* surface, void* pointer,
+                         wl_fixed_t x, wl_fixed_t y, uint32_t serial) {
+  if (warp == nullptr) return;
+  if (marshal_flags()) {
+    marshal_flags()(warp, WP_POINTER_WARP_V1_WARP_POINTER, nullptr,
+                    get_version()(warp), 0, surface, pointer, x, y, serial);
+    return;
+  }
+  if (marshal()) {
+    marshal()(warp, WP_POINTER_WARP_V1_WARP_POINTER, surface, pointer, x, y,
+              serial);
+  }
+}
+
+}  // namespace nmc_wl
+
+// Our wl_pointer listener — its only job is to capture the wl_pointer.ENTER
+// serial and whether our pointer is over one of our surfaces (focus), both of
+// which warp_pointer needs. The dispatcher indexes this table by event opcode,
+// so EVERY slot must be a valid function. We bind our seat at version 1, so only
+// enter/leave/motion/button/axis are ever delivered; the rest are belt-and-
+// braces stubs in case of a higher-versioned proxy.
+static void nmc_wp_enter(void* data, struct wl_pointer*, uint32_t serial,
+                         struct wl_surface*, wl_fixed_t, wl_fixed_t) {
+  auto* self = static_cast<NmcPointer*>(data);
+  self->wl_warp_serial = serial;
+  self->wl_warp_focused = true;
+}
+static void nmc_wp_leave(void* data, struct wl_pointer*, uint32_t,
+                         struct wl_surface*) {
+  static_cast<NmcPointer*>(data)->wl_warp_focused = false;
+}
+static void nmc_wp_motion(void*, struct wl_pointer*, uint32_t, wl_fixed_t,
+                          wl_fixed_t) {}
+// Intentionally a no-op: warp_pointer's serial arg is documented as the
+// wl_pointer.ENTER serial, and compositors reject a wrong one. A button serial
+// is NOT an enter serial, so we must NOT overwrite wl_warp_serial here — the
+// enter serial (set above) stays valid for the whole implicit grab / drag.
+static void nmc_wp_button(void*, struct wl_pointer*, uint32_t, uint32_t,
+                          uint32_t, uint32_t) {}
+static void nmc_wp_axis(void*, struct wl_pointer*, uint32_t, uint32_t,
+                        wl_fixed_t) {}
+static void nmc_wp_frame(void*, struct wl_pointer*) {}
+static void nmc_wp_axis_source(void*, struct wl_pointer*, uint32_t) {}
+static void nmc_wp_axis_stop(void*, struct wl_pointer*, uint32_t, uint32_t) {}
+static void nmc_wp_axis_discrete(void*, struct wl_pointer*, uint32_t, int32_t) {}
+static void nmc_wp_axis_value120(void*, struct wl_pointer*, uint32_t, int32_t) {}
+static void nmc_wp_axis_rel_dir(void*, struct wl_pointer*, uint32_t, uint32_t) {}
+
+static void (*kPointerListener[])(void) = {
+    reinterpret_cast<void (*)(void)>(nmc_wp_enter),
+    reinterpret_cast<void (*)(void)>(nmc_wp_leave),
+    reinterpret_cast<void (*)(void)>(nmc_wp_motion),
+    reinterpret_cast<void (*)(void)>(nmc_wp_button),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis),
+    reinterpret_cast<void (*)(void)>(nmc_wp_frame),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis_source),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis_stop),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis_discrete),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis_value120),
+    reinterpret_cast<void (*)(void)>(nmc_wp_axis_rel_dir)};
+
+// One-time setup: bind the warp global + our own wl_seat/wl_pointer (to read
+// serials). Done EARLY (from nmc_pointer_new) so our pointer is listening before
+// the user first enters the window — a freshly-created wl_pointer is not sent an
+// enter for the already-focused surface, so late setup would miss the serial.
+// Idempotent; only commits `tried` once the display is actually ready, so an
+// early call before the Wayland display exists harmlessly retries later.
+static void nmc_wl_warp_ensure(NmcPointer* self) {
+  if (self->wl_warp_tried) return;
+  GdkDisplay* gdpy = gdk_display_get_default();
+  if (gdpy == nullptr || !GDK_IS_WAYLAND_DISPLAY(gdpy) || !nmc_wl::core_ok()) {
+    return;  // not ready yet — retry on a later call
+  }
+  if (nmc_wl::seat_iface() == nullptr || nmc_wl::pointer_iface() == nullptr) {
+    return;
+  }
+  self->wl_warp_tried = true;
+  struct wl_display* dpy = gdk_wayland_display_get_wl_display(gdpy);
+  if (dpy == nullptr) return;
+  self->wl_warp = nmc_wl_bind(dpy, "wp_pointer_warp_v1", 1,
+                              &wp_pointer_warp_v1_interface);
+  if (self->wl_warp == nullptr) return;  // compositor doesn't advertise it
+  struct wl_proxy* seat =
+      nmc_wl_bind(dpy, "wl_seat", 1, nmc_wl::seat_iface());
+  if (seat == nullptr) return;
+  self->wl_warp_seat = seat;
+  // wl_seat.get_pointer — opcode 0.
+  struct wl_proxy* ptr =
+      nmc_wl::construct0(seat, 0, nmc_wl::pointer_iface());
+  if (ptr == nullptr) return;
+  self->wl_warp_pointer = ptr;
+  nmc_wl::add_listener()(ptr, kPointerListener, self);
+  if (nmc_wl::flush()) nmc_wl::flush()(dpy);
+}
+
+// Warp is usable only when the global is bound AND we have current focus + a
+// real enter serial. Otherwise canWarpPointer() stays false and the Dart side
+// uses the lock fallback — so a missing serial never produces a broken warp.
+static bool nmc_wl_warp_available(NmcPointer* self) {
+  return nmc_wl_available(self) && self->wl_warp != nullptr &&
+         self->wl_warp_pointer != nullptr && self->wl_warp_focused &&
+         self->wl_warp_serial != 0;
+}
+#endif  // NMC_WAYLAND_WARP
+
 #endif  // NMC_WAYLAND_RUNTIME
+
+FlMethodResponse* nmc_pointer_can_warp(NmcPointer* self) {
+  bool ok = false;
+#ifdef NMC_X11_RUNTIME
+  GdkDisplay* display = gdk_display_get_default();
+  if (display != nullptr && GDK_IS_X11_DISPLAY(display) &&
+      nmc_x_warp() != nullptr) {
+    ok = true;
+  }
+#endif
+#ifdef NMC_WAYLAND_WARP
+  // Wayland: warp is available when the compositor advertises wp_pointer_warp_v1
+  // and we hold a current focus + enter serial. If so, report true so the Dart
+  // side takes the visible-cursor warp path (update()) instead of locking;
+  // otherwise it falls back to lockPointer (the established Wayland path).
+  if (!ok) {
+    nmc_wl_warp_ensure(self);
+    if (nmc_wl_warp_available(self)) ok = true;
+  }
+#endif
+  (void)self;
+  return FL_METHOD_RESPONSE(
+      fl_method_success_response_new(fl_value_new_bool(ok)));
+}
+
+FlMethodResponse* nmc_pointer_warp(NmcPointer* self, FlValue* args) {
+#ifdef NMC_X11_RUNTIME
+  GdkDisplay* display = gdk_display_get_default();
+  XWarpPointerFn warp = nmc_x_warp();
+  FlView* view = self->registrar
+                     ? fl_plugin_registrar_get_view(self->registrar)
+                     : nullptr;
+  if (display != nullptr && GDK_IS_X11_DISPLAY(display) && warp != nullptr &&
+      view != nullptr) {
+    double lx = value_to_double(fl_value_lookup_string(args, "x"), 0);
+    double ly = value_to_double(fl_value_lookup_string(args, "y"), 0);
+    GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(view));
+    if (window != nullptr) {
+      // x/y are Flutter-LOGICAL coords relative to the FlView (top-left,
+      // y-down). Map to root (screen) X11 pixels. We anchor on the FlVIEW's own
+      // window origin — NOT the toplevel's — because the toplevel origin can be
+      // offset by window decorations / a header bar, which made the warp land
+      // wrong vertically ("jump to top"). If the view shares the toplevel's
+      // window (no native subwindow), add the view's allocation offset so (0,0)
+      // still maps to the view's top-left.
+      gint scale = gdk_window_get_scale_factor(window);
+      gint ox = 0, oy = 0;
+      gdk_window_get_origin(window, &ox, &oy);
+      GtkAllocation alloc = {};
+      gtk_widget_get_allocation(GTK_WIDGET(view), &alloc);
+      if (!gtk_widget_get_has_window(GTK_WIDGET(view))) {
+        ox += alloc.x * scale;
+        oy += alloc.y * scale;
+      }
+      Display* xdisplay = GDK_DISPLAY_XDISPLAY(display);
+      ::Window root = DefaultRootWindow(xdisplay);
+      int rx = ox + static_cast<int>(lx * scale + 0.5);
+      int ry = oy + static_cast<int>(ly * scale + 0.5);
+      warp(xdisplay, None, root, 0, 0, 0, 0, rx, ry);
+      if (XFlushFn flush = nmc_x_flush()) flush(xdisplay);
+    }
+  }
+#endif
+#ifdef NMC_WAYLAND_WARP
+  if (nmc_wl_warp_available(self)) {
+    GdkDisplay* gdpy = gdk_display_get_default();
+    GdkWindow* win = get_gdk_window(self);
+    FlView* view = self->registrar
+                       ? fl_plugin_registrar_get_view(self->registrar)
+                       : nullptr;
+    struct wl_surface* surface =
+        win ? gdk_wayland_window_get_wl_surface(win) : nullptr;
+    if (gdpy != nullptr && win != nullptr && view != nullptr &&
+        surface != nullptr) {
+      double lx = value_to_double(fl_value_lookup_string(args, "x"), 0);
+      double ly = value_to_double(fl_value_lookup_string(args, "y"), 0);
+      // x/y are Flutter-LOGICAL coords relative to the FlView. warp_pointer wants
+      // SURFACE-LOCAL coords of the target wl_surface, which on Wayland are
+      // logical (the compositor applies buffer scale) — so NO scale multiply,
+      // just add the view's offset within the toplevel surface (header bar /
+      // CSD). Passing view coords instead of surface-local is the classic
+      // "warp lands out of bounds → cursor snaps back" bug.
+      gint vx = 0, vy = 0;
+      GtkWidget* top = gtk_widget_get_toplevel(GTK_WIDGET(view));
+      gtk_widget_translate_coordinates(GTK_WIDGET(view), top, 0, 0, &vx, &vy);
+      double sx = vx + lx;
+      double sy = vy + ly;
+      // Clamp inside the surface (out-of-bounds is rejected by the compositor);
+      // inset 1px so we never land exactly on the edge.
+      int sw = gdk_window_get_width(gtk_widget_get_window(top));
+      int sh = gdk_window_get_height(gtk_widget_get_window(top));
+      if (sw > 2) sx = sx < 1 ? 1 : (sx > sw - 1 ? sw - 1 : sx);
+      if (sh > 2) sy = sy < 1 ? 1 : (sy > sh - 1 ? sh - 1 : sy);
+      nmc_wl::warp_request(
+          static_cast<struct wl_proxy*>(self->wl_warp), surface,
+          self->wl_warp_pointer,
+          static_cast<wl_fixed_t>(sx * 256.0 + 0.5),
+          static_cast<wl_fixed_t>(sy * 256.0 + 0.5), self->wl_warp_serial);
+      // Send-only (don't roundtrip/reenter GDK), matching the lock path.
+      if (nmc_wl::flush()) {
+        nmc_wl::flush()(gdk_wayland_display_get_wl_display(gdpy));
+      }
+      return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    }
+  }
+#endif
+  (void)self;
+  (void)args;
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+}
 
 FlMethodResponse* nmc_pointer_lock(NmcPointer* self) {
   bool ok = false;
@@ -580,6 +799,13 @@ FlMethodResponse* nmc_pointer_drain(NmcPointer* self) {
 NmcPointer* nmc_pointer_new(FlPluginRegistrar* registrar) {
   NmcPointer* p = g_new0(NmcPointer, 1);
   p->registrar = registrar;
+#ifdef NMC_WAYLAND_WARP
+  // Stand up our serial-capturing wl_pointer early so it receives the
+  // wl_pointer.enter before the user's first drag (a late-created pointer isn't
+  // sent enter for the already-focused surface). Harmless/retried if the Wayland
+  // display isn't ready yet.
+  nmc_wl_warp_ensure(p);
+#endif
   return p;
 }
 
@@ -605,6 +831,23 @@ void nmc_pointer_free(NmcPointer* self) {
       nmc_wl::proxy_destroy()(
           static_cast<struct wl_proxy*>(self->wl_constraints));
     }
+#ifdef NMC_WAYLAND_WARP
+    if (self->wl_warp_pointer) {
+      nmc_wl::proxy_destroy()(
+          static_cast<struct wl_proxy*>(self->wl_warp_pointer));
+    }
+    if (self->wl_warp_seat) {
+      nmc_wl::proxy_destroy()(static_cast<struct wl_proxy*>(self->wl_warp_seat));
+    }
+    if (self->wl_warp) {
+      // wp_pointer_warp_v1 declares a `destroy` destructor — send it (which also
+      // frees the proxy), like the per-lock proxies in nmc_pointer_unlock. (Our
+      // v1 wl_seat / wl_pointer have no destructor request, so they stay a bare
+      // proxy_destroy above.)
+      nmc_wl::destroy_request(static_cast<struct wl_proxy*>(self->wl_warp),
+                              WP_POINTER_WARP_V1_DESTROY);
+    }
+#endif
   }
 #endif
   g_free(self);

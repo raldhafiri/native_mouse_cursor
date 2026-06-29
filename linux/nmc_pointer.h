@@ -6,9 +6,12 @@
 //
 // It backs the package's "infinite / relative drag":
 //   • X11      — warpPointer via the runtime-resolved XWarpPointer (teleport).
-//   • Wayland  — lockPointer / unlockPointer / drainPointerLockDelta via
+//   • Wayland  — warpPointer via wp_pointer_warp_v1 (staging) when the compositor
+//                advertises it (GNOME 49+, Plasma 6.5+, Hyprland 0.51+, …) — a
+//                visible wrapping cursor like the other platforms. Otherwise
+//                lockPointer / unlockPointer / drainPointerLockDelta via
 //                pointer-constraints-v1 + relative-pointer-v1 (lock + relative
-//                motion), since Wayland forbids absolute warping.
+//                motion), the long-standing fallback.
 //   • else     — graceful no-ops (the Dart side falls back to a clamped drag).
 //
 // All native symbols (libX11 / libwayland-client) are resolved at RUNTIME via
@@ -32,14 +35,16 @@ void nmc_pointer_free(NmcPointer* p);
 
 // ── method-channel handlers (return an owned FlMethodResponse) ───────────────
 
-// canWarpPointer → bool. True only under X11.
+// canWarpPointer → bool. True under X11, or Wayland when wp_pointer_warp_v1 is
+// available (compositor + a current focus/serial); false otherwise.
 FlMethodResponse* nmc_pointer_can_warp(NmcPointer* p);
 
-// warpPointer{x,y} → null. Teleports the OS pointer (X11 only; no-op elsewhere).
+// warpPointer{x,y} → null. Teleports the OS pointer (X11 via XWarpPointer;
+// Wayland via wp_pointer_warp_v1; no-op elsewhere).
 FlMethodResponse* nmc_pointer_warp(NmcPointer* p, FlValue* args);
 
-// lockPointer → bool. Wayland: lock + start relative-motion stream. Elsewhere
-// (incl. X11, which warps instead) returns false.
+// lockPointer → bool. Wayland (no warp protocol): lock + start relative-motion
+// stream. Elsewhere (incl. X11, and Wayland-with-warp, which warp) returns false.
 FlMethodResponse* nmc_pointer_lock(NmcPointer* p);
 
 // unlockPointer → null. Wayland: release the lock + relative pointer.
