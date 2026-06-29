@@ -4,7 +4,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:native_mouse_cursor/native_mouse_cursor_platform_interface.dart';
+import 'package:native_mouse_cursor/src/native_mouse_cursor_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 /// One recorded `createCursor` call (so tests can assert the baked geometry).
@@ -48,14 +48,16 @@ class MockNativeMouseCursorPlatform
     required int hotY,
     required double devicePixelRatio,
   }) async {
-    created.add(CreatedCursor(
-      key: key,
-      width: width,
-      height: height,
-      hotX: hotX,
-      hotY: hotY,
-      dpr: devicePixelRatio,
-    ));
+    created.add(
+      CreatedCursor(
+        key: key,
+        width: width,
+        height: height,
+        hotX: hotX,
+        hotY: hotY,
+        dpr: devicePixelRatio,
+      ),
+    );
   }
 
   @override
@@ -120,6 +122,27 @@ class MockNativeMouseCursorPlatform
     return d;
   }
 
+  bool lockArmed = false;
+
+  @override
+  void setPointerLockArmed(bool armed) => lockArmed = armed;
+
+  bool scrubLockEnabled = false;
+
+  @override
+  void enablePointerLockScrub(bool enable) => scrubLockEnabled = enable;
+
+  bool firefox = false;
+
+  @override
+  bool get isFirefox => firefox;
+
+  void Function(bool locked)? lockListener;
+
+  @override
+  void setPointerLockListener(void Function(bool locked)? listener) =>
+      lockListener = listener;
+
   @override
   Future<void> createCursorWeb({
     required String key,
@@ -129,14 +152,16 @@ class MockNativeMouseCursorPlatform
     required int hotX,
     required int hotY,
   }) async {
-    created.add(CreatedCursor(
-      key: key,
-      width: lo.length,
-      height: hi.length,
-      hotX: hotX,
-      hotY: hotY,
-      dpr: density,
-    ));
+    created.add(
+      CreatedCursor(
+        key: key,
+        width: lo.length,
+        height: hi.length,
+        hotX: hotX,
+        hotY: hotY,
+        dpr: density,
+      ),
+    );
   }
 }
 

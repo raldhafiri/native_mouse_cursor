@@ -3,8 +3,8 @@
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:native_mouse_cursor/native_mouse_cursor_method_channel.dart';
-import 'package:native_mouse_cursor/native_mouse_cursor_platform_interface.dart';
+import 'package:native_mouse_cursor/src/native_mouse_cursor_method_channel.dart';
+import 'package:native_mouse_cursor/src/native_mouse_cursor_platform_interface.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -19,9 +19,9 @@ void main() {
     reply = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
-      return reply;
-    });
+          calls.add(call);
+          return reply;
+        });
   });
 
   tearDown(() {

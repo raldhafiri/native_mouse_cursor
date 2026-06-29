@@ -1,9 +1,0 @@
-# Hide implementation-only libraries from the generated API docs (pub.dev).
-# These live at the top level of lib/ because the plugin tooling requires it
-# (the web entrypoint is referenced by `fileName:` in pubspec.yaml), but they
-# are internal plumbing — not part of the public API.
-dartdoc:
-  nodoc:
-    - "lib/native_mouse_cursor_web.dart"
-    - "lib/native_mouse_cursor_method_channel.dart"
-    - "lib/native_mouse_cursor_platform_interface.dart"

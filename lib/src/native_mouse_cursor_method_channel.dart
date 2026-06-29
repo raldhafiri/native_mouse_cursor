@@ -56,8 +56,9 @@ class MethodChannelNativeMouseCursor extends NativeMouseCursorPlatform {
   @override
   Future<void> setPointerHidden(bool hidden) async {
     try {
-      await methodChannel
-          .invokeMethod<void>('setPointerHidden', {'hidden': hidden});
+      await methodChannel.invokeMethod<void>('setPointerHidden', {
+        'hidden': hidden,
+      });
     } on MissingPluginException {
       // Host doesn't implement it (everything but Android) — fine.
     } on PlatformException {
@@ -138,8 +139,10 @@ class MethodChannelNativeMouseCursor extends NativeMouseCursorPlatform {
         assert(() {
           if (raw != null) {
             // ignore: avoid_print
-            debugPrint('[native_mouse_cursor] drain returned non-map: '
-                '${raw.runtimeType} = $raw');
+            debugPrint(
+              '[native_mouse_cursor] drain returned non-map: '
+              '${raw.runtimeType} = $raw',
+            );
           }
           return true;
         }());

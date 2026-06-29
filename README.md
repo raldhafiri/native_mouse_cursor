@@ -40,6 +40,9 @@ draws it for you. 🪄
 - 🖥️ **HiDPI-crisp** — bakes at your device pixel ratio and re-bakes on change.
 - 🖌️ **Optional painted overlay** — on web/desktop, opt into an in-app overlay
   that hides the system cursor and paints a perfectly seamless per-region one.
+- ↔️ **Infinite drag** — `InfiniteDragRegion` gives an unbounded value scrub on
+  every platform (desktop edge-warp, web Pointer Lock incl. Firefox), with a
+  cursor that wraps the viewport on web.
 - 📦 **SPM-first on macOS** — no CocoaPods required.
 
 ## 🧩 Platform support
@@ -76,7 +79,7 @@ is touch-only — no pointer to replace.</sub>
 
 ```yaml
 dependencies:
-  native_mouse_cursor: ^1.0.1
+  native_mouse_cursor: ^1.2.0
 ```
 
 ```bash
@@ -204,10 +207,41 @@ NativeMouseCursor.disposeAll();       // 🧼 everything
 ## ↔️ Infinite drag (relative / warp)
 
 **Infinite drag**: drag a number (or any handle) and the value keeps changing
-forever because the **pointer wraps at the window edge** instead of running into
-it. `InfiniteDragController` owns all the per-OS work — you keep your
-own gesture and just feed it the pointer + viewport, and it returns the
-*effective* `dx` to apply (warp-jump frame already skipped, edge already wrapped):
+forever because the pointer never runs out of room. Wrap your handle in
+**`InfiniteDragRegion`** and you're done — it handles every platform and browser
+for you, and hands you the *effective* delta to apply each frame:
+
+```dart
+double value = 0;
+
+InfiniteDragRegion(
+  // Optional: a baked cursor. While locked on web it's painted WRAPPING the
+  // viewport so it never disappears.
+  cursor: NativeMouseCursor.get('scrub', fallback: SystemMouseCursors.resizeLeftRight),
+  onScrub: (delta) => setState(() => value += delta.dx * scrubRate),
+  onActiveChanged: (active) => setState(() => _dragging = active), // optional
+  child: Text('$value'),
+);
+```
+
+That single widget picks the right mechanism automatically:
+
+- **desktop** — the OS pointer **warps** at the window edge (visible, wraps).
+- **web — Chrome / Safari / Edge** — **press-drag** via Pointer Lock.
+- **web — Firefox** — **click-to-engage** via Pointer Lock (Firefox only grants a
+  lock from a `click`): click the handle to start scrubbing, move, click / Esc to
+  stop.
+- **mobile** — ordinary clamped drag.
+
+On web, while the pointer is locked the real cursor is hidden, so the baked
+`cursor` is painted **wrapping** around the viewport instead — it never leaves the
+screen.
+
+### Lower-level control
+
+Prefer to own the gesture? `InfiniteDragController` is still public — feed it the
+pointer + viewport and it returns the effective `dx` (warp-jump frame skipped,
+edge already wrapped):
 
 ```dart
 final _drag = InfiniteDragController();
@@ -228,20 +262,18 @@ GestureDetector(
 );
 ```
 
-> 💡 The snippet above is the desktop **warp** path. To also support **web** and
-> **Wayland** (where the OS stops sending motion to Flutter while the pointer is
-> locked), pass an `onLockedDelta` callback to `start()` and apply the same scrub
-> there — see [doc/infinite_drag.md](doc/infinite_drag.md).
+> 💡 That snippet is the desktop **warp** path. The lock-based paths (web,
+> Wayland) and Firefox's click-to-engage are exactly what `InfiniteDragRegion`
+> wires up for you — see [doc/infinite_drag.md](doc/infinite_drag.md) if you need
+> to do it by hand.
 
 The low-level primitive is also public: `NativeMouseCursor.warpPointer(x, y)`
 teleports the OS pointer to logical window coords, and
 `NativeMouseCursor.canWarpPointer()` reports whether the host supports it.
 
-Works on macOS, Windows, Linux (X11 **and** Wayland) and the web — each via the
-right native mechanism (cursor warp on most desktops; pointer-lock on Wayland and
-the web). The controller hides all of that, so your code stays the same
-everywhere. Mobile falls back to an ordinary clamped drag. For the per-platform
-mechanisms, the Wayland lock approach and the build requirements, see
+Works on macOS, Windows, Linux (X11 **and** Wayland) and the web. For the
+per-platform mechanisms, the Firefox click-to-engage model, the Wayland lock
+approach and the build requirements, see
 **[doc/infinite_drag.md](doc/infinite_drag.md)**.
 
 ## 🖌️ Painted overlay (web / desktop)

@@ -23,6 +23,7 @@ flutter run -d macos     # or: -d chrome / windows / linux
 | **Hotspot** | A red dot marks the true pointer position — see it on the tip vs the glyph centre. | `hotspot:` |
 | **Baked drop shadow** | The same glyph with a baked shadow vs none. | `shadow:` |
 | **Cursor sources** | The four ways to register a glyph, side by side. | `svg` / `image` / `draw` / `builder` |
+| **Infinite drag** | Drag the number — it scrubs forever (edge-warp on desktop, Pointer Lock on web incl. Firefox) with a wrapping cursor. | `InfiniteDragRegion` |
 
 It also uses **`NativeMouseCursorMixin`** to auto-configure the bake DPR and
 rebuild when a cursor finishes baking, so the demos can call `get` straight from

@@ -133,4 +133,29 @@ abstract class NativeMouseCursorPlatform extends PlatformInterface {
   /// call, then reset to zero — a poll-based drain of the pointer-lock
   /// `movementX`/`movementY` stream. Off the web it returns `Offset.zero`.
   Future<Offset> drainPointerLockDelta() async => Offset.zero;
+
+  /// Web only: "arm" the next pointer-down to focus the document in the genuine
+  /// native event (capture phase), so a subsequent [lockPointer] is granted by
+  /// Firefox (which denies a lock requested while the document isn't focused —
+  /// and a `pointerdown` fires *before* the `mousedown` that focuses it). Call
+  /// with `true` while the pointer is over a draggable, `false` otherwise. A
+  /// no-op off the web.
+  void setPointerLockArmed(bool armed) {}
+
+  /// Web only: enable a native **press-drag** Pointer Lock on the Flutter view —
+  /// the model Firefox grants (it locks on `mousedown`, which focuses the
+  /// document, unlike a `pointerdown` request before it). While enabled, a
+  /// mousedown (when armed via [setPointerLockArmed]) requests the lock and the
+  /// matching mouseup exits it. A no-op off the web.
+  void enablePointerLockScrub(bool enable) {}
+
+  /// Web only: observe Pointer Lock engage/release (from [enablePointerLockScrub]
+  /// or the user pressing Esc). Pass null to clear. A no-op off the web.
+  void setPointerLockListener(void Function(bool locked)? listener) {}
+
+  /// Web only: whether the browser is **Firefox**, which grants Pointer Lock only
+  /// on a `click` (after the `mousedown` that focuses the document) — not on the
+  /// `pointerdown` a press-drag uses. Lets a consumer pick the click-to-lock path
+  /// there and keep press-drag elsewhere. False off the web / on other browsers.
+  bool get isFirefox => false;
 }

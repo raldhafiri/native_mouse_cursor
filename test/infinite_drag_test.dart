@@ -73,32 +73,37 @@ void main() {
       expect(mock.warps.single.dx, greaterThan(viewport.width * 0.5));
     });
 
-    test('does not re-warp on the frames right after a warp (cooldown)',
-        () async {
-      await drag.start(const Offset(500, 300));
-      // First update at the edge → one warp.
-      await drag.update(
-        globalPosition: const Offset(998, 300),
-        delta: const Offset(6, 0),
-        viewportSize: viewport,
-      );
-      expect(mock.warps, hasLength(1));
-      // The next couple of updates (the jump + settle) must NOT fire more warps,
-      // even if they still report being near an edge.
-      final dxA = await drag.update(
-        globalPosition: const Offset(2, 300), // looks like it's at the left edge
-        delta: const Offset(-980, 0), // the warp jump
-        viewportSize: viewport,
-      );
-      final dxB = await drag.update(
-        globalPosition: const Offset(4, 300),
-        delta: const Offset(2, 0),
-        viewportSize: viewport,
-      );
-      expect(mock.warps, hasLength(1)); // still just the one
-      expect(dxA, 0); // jump swallowed
-      expect(dxB, 0); // settle frame swallowed
-    });
+    test(
+      'does not re-warp on the frames right after a warp (cooldown)',
+      () async {
+        await drag.start(const Offset(500, 300));
+        // First update at the edge → one warp.
+        await drag.update(
+          globalPosition: const Offset(998, 300),
+          delta: const Offset(6, 0),
+          viewportSize: viewport,
+        );
+        expect(mock.warps, hasLength(1));
+        // The next couple of updates (the jump + settle) must NOT fire more warps,
+        // even if they still report being near an edge.
+        final dxA = await drag.update(
+          globalPosition: const Offset(
+            2,
+            300,
+          ), // looks like it's at the left edge
+          delta: const Offset(-980, 0), // the warp jump
+          viewportSize: viewport,
+        );
+        final dxB = await drag.update(
+          globalPosition: const Offset(4, 300),
+          delta: const Offset(2, 0),
+          viewportSize: viewport,
+        );
+        expect(mock.warps, hasLength(1)); // still just the one
+        expect(dxA, 0); // jump swallowed
+        expect(dxB, 0); // settle frame swallowed
+      },
+    );
 
     test('does not lock the pointer on a warp host', () async {
       await drag.start(const Offset(500, 300));
@@ -119,8 +124,10 @@ void main() {
     });
 
     test('both axes wrap when axis: both', () async {
-      final d = InfiniteDragController(axis: InfiniteDragAxis.both,
-          platform: mock);
+      final d = InfiniteDragController(
+        axis: InfiniteDragAxis.both,
+        platform: mock,
+      );
       await d.start(const Offset(500, 300));
       await d.update(
         globalPosition: const Offset(500, 1), // top edge
@@ -149,30 +156,97 @@ void main() {
       expect(mock.unlockCount, 1);
     });
 
-    test('update() returns zero on the lock path (ticker drives instead)',
-        () async {
-      await drag.start(const Offset(500, 300), onLockedDelta: (_) {});
-      mock.lockDelta = const Offset(42, 0);
-      final dx = await drag.update(
-        globalPosition: const Offset(500, 300),
-        delta: Offset.zero,
-        viewportSize: viewport,
-      );
-      expect(dx, 0); // the locked path is driven by onLockedDelta, not update()
-      expect(mock.warps, isEmpty); // never warps on web/Wayland
-      await drag.end();
-    });
+    test(
+      'update() returns zero on the lock path (ticker drives instead)',
+      () async {
+        await drag.start(const Offset(500, 300), onLockedDelta: (_) {});
+        mock.lockDelta = const Offset(42, 0);
+        final dx = await drag.update(
+          globalPosition: const Offset(500, 300),
+          delta: Offset.zero,
+          viewportSize: viewport,
+        );
+        expect(
+          dx,
+          0,
+        ); // the locked path is driven by onLockedDelta, not update()
+        expect(mock.warps, isEmpty); // never warps on web/Wayland
+        await drag.end();
+      },
+    );
 
     test('pushes polled lock motion to onLockedDelta on a ticker', () async {
       Offset received = Offset.zero;
-      await drag.start(const Offset(500, 300),
-          onLockedDelta: (d) => received += d);
+      await drag.start(
+        const Offset(500, 300),
+        onLockedDelta: (d) => received += d,
+      );
       mock.lockDelta = const Offset(42, -3);
       // Wait past the ~16ms ticker so it polls drainPointerLockDelta once.
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(received.dx, 42);
       expect(received.dy, -3);
       await drag.end();
+    });
+
+    test('drives a wrapped cursor position from polled lock motion', () async {
+      Offset? wrapped;
+      await drag.start(
+        const Offset(990, 300),
+        onLockedDelta: (_) {},
+        onCursorWrap: (p) => wrapped = p,
+        viewportSize: viewport,
+      );
+      mock.lockDelta = const Offset(40, 0); // 990 + 40 = 1030 → wraps to 30
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(wrapped, isNotNull);
+      expect(wrapped!.dx, closeTo(30, 0.001));
+      await drag.end();
+    });
+  });
+
+  group('InfiniteDragController.wrapPosition (the MDN modulo trick)', () {
+    test('horizontal: x folds at the right edge, y is clamped not wrapped', () {
+      final p = InfiniteDragController.wrapPosition(
+        const Offset(990, 590),
+        const Offset(40, 40), // x: 1030→30 (wrap); y: 630→600 (clamp)
+        viewport,
+        InfiniteDragAxis.horizontal,
+      );
+      expect(p.dx, closeTo(30, 0.001));
+      expect(p.dy, closeTo(600, 0.001));
+    });
+
+    test('horizontal: x re-enters from the right when going negative', () {
+      final p = InfiniteDragController.wrapPosition(
+        const Offset(10, 300),
+        const Offset(-30, 0), // -20 → 980
+        viewport,
+        InfiniteDragAxis.horizontal,
+      );
+      expect(p.dx, closeTo(980, 0.001));
+    });
+
+    test('both: wraps on both axes', () {
+      final p = InfiniteDragController.wrapPosition(
+        const Offset(990, 590),
+        const Offset(40, 40),
+        viewport,
+        InfiniteDragAxis.both,
+      );
+      expect(p.dx, closeTo(30, 0.001));
+      expect(p.dy, closeTo(30, 0.001));
+    });
+
+    test('vertical: only y wraps; x is clamped', () {
+      final p = InfiniteDragController.wrapPosition(
+        const Offset(1200, 590),
+        const Offset(40, 40),
+        viewport,
+        InfiniteDragAxis.vertical,
+      );
+      expect(p.dx, closeTo(1000, 0.001)); // clamped to width
+      expect(p.dy, closeTo(30, 0.001)); // wrapped
     });
   });
 }

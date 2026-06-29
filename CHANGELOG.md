@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0 (unreleased)
+
+- Add **`InfiniteDragRegion`** — infinite drag in one widget. Wraps any handle
+  and picks the right model per target automatically (desktop edge-warp, web
+  Pointer Lock), so consumers no longer hand-roll the gesture/lock plumbing.
+- **Infinite drag now works on Firefox** (uses a click-to-engage Pointer Lock,
+  since Firefox grants a lock only from a `click`; other browsers keep
+  press-drag). On web the cursor is painted **wrapping** the viewport while
+  locked, instead of vanishing.
+- Also public, for painting a custom wrapping cursor: `DragCursorOverlay`,
+  `NativeMouseCursor.wrapOverlayCursor`, `InfiniteDragController.wrapPosition`.
+- Docs/structure: implementation libraries moved under `lib/src/`, so the
+  generated API docs now show only the public `native_mouse_cursor` library.
+- Additive — no breaking changes.
+
 ## 1.1.0
 
 - Add **infinite drag** support: `InfiniteDragController` plus the

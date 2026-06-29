@@ -241,10 +241,10 @@ class _ShowcasePageState extends State<ShowcasePage>
             icon: Icons.swap_horiz,
             title: 'Infinite drag',
             description:
-                'Drag the number left/right to change it. The pointer WRAPS at '
-                'the window edge (macOS / Windows / Linux-X11) so the drag never '
-                'runs out of room. On web / Wayland it uses pointer lock. One '
-                'InfiniteDragController does all the per-OS math.',
+                'Drag the number to change it — one InfiniteDragRegion. The '
+                'pointer wraps at the window edge on desktop; on web it uses '
+                'Pointer Lock (press-drag on Chrome/Safari/Edge, click-to-engage '
+                'on Firefox) with a wrapping cursor.',
             child: _ScrubDemo(),
           ),
         ],
@@ -502,67 +502,18 @@ class _SourcesDemo extends StatelessWidget {
   }
 }
 
-/// Infinite-drag demo: drag the big number to change it. The pointer wraps at
-/// the window edge (desktop) / pointer-locks (web) via [InfiniteDragController],
-/// so a value can be dragged arbitrarily far without the cursor leaving the app.
+/// Infinite-drag demo: drag the big number to change it. [InfiniteDragRegion]
+/// handles the per-platform machinery — desktop edge-warp, web Chrome/Safari/Edge
+/// press-drag, web Firefox click-to-engage — plus the wrapping cursor on web.
 class _ScrubDemo extends StatefulWidget {
   @override
   State<_ScrubDemo> createState() => _ScrubDemoState();
 }
 
 class _ScrubDemoState extends State<_ScrubDemo> {
-  final InfiniteDragController _drag = InfiniteDragController();
   double _value = 50;
   double _raw = 50; // fractional accumulator; the label shows the rounded int
   bool _scrubbing = false;
-  bool _warp = false; // whether warping is available on this host (post-start)
-
-  // While scrubbing, a full-screen overlay LOCKS the custom ↔ cursor across the
-  // whole app — so when the edge warp teleports the pointer off the number, the
-  // cursor stays the scrub glyph instead of reverting to whatever region it
-  // lands on. (On web, pointer-lock hides the cursor instead.)
-  OverlayEntry? _cursorLock;
-
-  void _lockScrubCursor() {
-    if (_cursorLock != null) return;
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
-    if (overlay == null) return;
-    _cursorLock = OverlayEntry(
-      builder: (_) => Positioned.fill(
-        child: MouseRegion(
-          cursor: NativeMouseCursor.get(
-            'scrub',
-            fallback: SystemMouseCursors.resizeLeftRight,
-          ),
-          opaque: false,
-          child: const SizedBox.expand(),
-        ),
-      ),
-    );
-    overlay.insert(_cursorLock!);
-  }
-
-  void _unlockScrubCursor() {
-    _cursorLock?.remove();
-    _cursorLock = null;
-  }
-
-  // Apply one scrub step; shared by the warp path (update) and lock path
-  // (onLockedDelta) so both behave the same.
-  void _applyScrub(double dx) {
-    if (!mounted || dx == 0) return;
-    setState(() {
-      _raw += dx * 0.25; // 0.25 units per logical px
-      _value = _raw.roundToDouble();
-    });
-  }
-
-  @override
-  void dispose() {
-    _unlockScrubCursor();
-    _drag.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -573,67 +524,35 @@ class _ScrubDemoState extends State<_ScrubDemo> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            MouseRegion(
-              // The custom baked ↔ scrub cursor (falls back to the system resize
-              // cursor until it's baked / where bitmaps aren't supported).
+            InfiniteDragRegion(
               cursor: NativeMouseCursor.get(
                 'scrub',
                 fallback: SystemMouseCursors.resizeLeftRight,
               ),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragStart: (d) async {
-                  setState(() => _scrubbing = true);
-                  _raw = _value;
-                  _lockScrubCursor(); // keep ↔ locked across edge warps
-                  // onLockedDelta drives the value on the LOCK path (web /
-                  // Wayland) where Flutter's drag updates go silent.
-                  await _drag.start(
-                    d.globalPosition,
-                    onLockedDelta: (delta) => _applyScrub(delta.dx),
-                  );
-                  if (mounted) setState(() => _warp = _drag.warpAvailable);
-                },
-                onHorizontalDragUpdate: (d) async {
-                  final dx = await _drag.update(
-                    globalPosition: d.globalPosition,
-                    delta: d.delta,
-                    viewportSize: MediaQuery.sizeOf(context),
-                  );
-                  if (dx != 0) _applyScrub(dx);
-                },
-                onHorizontalDragEnd: (_) {
-                  _drag.end();
-                  _unlockScrubCursor();
-                  if (mounted) setState(() => _scrubbing = false);
-                },
-                onHorizontalDragCancel: () {
-                  _drag.cancel();
-                  _unlockScrubCursor();
-                  if (mounted) setState(() => _scrubbing = false);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 28,
-                    vertical: 8,
-                  ),
-                  child: Text(
-                    _value.toInt().toString(),
-                    style: TextStyle(
-                      fontSize: 64,
-                      fontWeight: FontWeight.w800,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                      color: _scrubbing ? scheme.primary : scheme.onSurface,
-                    ),
+              onActiveChanged: (a) => setState(() => _scrubbing = a),
+              onScrub: (delta) => setState(() {
+                _raw += delta.dx * 0.25; // 0.25 units per logical px
+                _value = _raw.roundToDouble();
+              }),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 8,
+                ),
+                child: Text(
+                  _value.toInt().toString(),
+                  style: TextStyle(
+                    fontSize: 64,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: _scrubbing ? scheme.primary : scheme.onSurface,
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 4),
             Text(
-              _scrubbing
-                  ? (_warp ? 'wrapping at the edge…' : 'pointer-locked…')
-                  : '← drag the number →',
+              _scrubbing ? 'scrubbing…' : '← drag the number →',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),

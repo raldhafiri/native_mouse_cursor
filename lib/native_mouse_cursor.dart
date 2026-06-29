@@ -9,9 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import 'native_mouse_cursor_platform_interface.dart';
+import 'src/native_mouse_cursor_platform_interface.dart';
 
-export 'infinite_drag.dart';
+export 'src/infinite_drag.dart';
+export 'src/infinite_drag_region.dart';
 
 part 'native_mouse_cursor_overlay.dart';
 
@@ -58,8 +59,9 @@ class NativeMouseCursor extends MouseCursor {
     int angleBucketDegrees = 4,
   }) {
     final m = _managed ??= _CursorCache(
-        devicePixelRatio: devicePixelRatio,
-        angleBucketDegrees: angleBucketDegrees);
+      devicePixelRatio: devicePixelRatio,
+      angleBucketDegrees: angleBucketDegrees,
+    );
     if (onReady != null) m.onCursorReady = onReady;
     m.devicePixelRatio = devicePixelRatio;
   }
@@ -78,13 +80,15 @@ class NativeMouseCursor extends MouseCursor {
     ui.Size? size,
     NativeCursorShadow? shadow = const NativeCursorShadow(),
     ui.Offset? hotspot,
-  }) =>
-      _cache.register(_SvgSource(
-          id: id,
-          asset: asset,
-          size: size,
-          shadow: shadow,
-          hotspot: hotspot));
+  }) => _cache.register(
+    _SvgSource(
+      id: id,
+      asset: asset,
+      size: size,
+      shadow: shadow,
+      hotspot: hotspot,
+    ),
+  );
 
   /// Register a decoded [image] under [id], drawn at [size] (default: the
   /// image's pixels as logical units — render it at a comfortable resolution).
@@ -95,13 +99,15 @@ class NativeMouseCursor extends MouseCursor {
     ui.Size? size,
     NativeCursorShadow? shadow = const NativeCursorShadow(),
     ui.Offset? hotspot,
-  }) =>
-      _cache.register(_ImageSource(
-          id: id,
-          image: image,
-          size: size,
-          shadow: shadow,
-          hotspot: hotspot));
+  }) => _cache.register(
+    _ImageSource(
+      id: id,
+      image: image,
+      size: size,
+      shadow: shadow,
+      hotspot: hotspot,
+    ),
+  );
 
   /// Register a hand-[painter]ed glyph under [id]: paint into a [size]-logical
   /// box; the package scales it to the DPR, rotates about the centre by the
@@ -113,24 +119,24 @@ class NativeMouseCursor extends MouseCursor {
     required CursorPainter painter,
     NativeCursorShadow? shadow = const NativeCursorShadow(),
     ui.Offset? hotspot,
-  }) =>
-      _cache.register(_DrawSource(
-          id: id,
-          size: size,
-          painter: painter,
-          shadow: shadow,
-          hotspot: hotspot));
+  }) => _cache.register(
+    _DrawSource(
+      id: id,
+      size: size,
+      painter: painter,
+      shadow: shadow,
+      hotspot: hotspot,
+    ),
+  );
 
   /// Register a fully custom source under [id]: produce the bitmap yourself for
   /// a given angle (radians) + DPR.
   static void builder(
     String id, {
     required Future<ui.Image> Function(double angle, double devicePixelRatio)
-        build,
+    build,
     ui.Offset? hotspot,
-  }) =>
-      _cache.register(
-          _BuilderSource(id: id, build: build, hotspot: hotspot));
+  }) => _cache.register(_BuilderSource(id: id, build: build, hotspot: hotspot));
 
   // ───────────────────────────────── fetch ───────────────────────────────────
 
@@ -150,13 +156,36 @@ class NativeMouseCursor extends MouseCursor {
     bool flipX = false,
     bool flipY = false,
     MouseCursor fallback = SystemMouseCursors.basic,
-  }) =>
-      _cache.get(id, angle: angle, flipX: flipX, flipY: flipY) ?? fallback;
+  }) => _cache.get(id, angle: angle, flipX: flipX, flipY: flipY) ?? fallback;
 
   /// Whether a cursor source is already registered under [id] — so callers can
   /// register once without tracking that themselves
   /// (`if (!NativeMouseCursor.has(id)) NativeMouseCursor.svg(id, …)`).
   static bool has(String id) => _managed?.isRegistered(id) ?? false;
+
+  // ────────────────────────────── overlay wrap ────────────────────────────────
+
+  /// Paint the cursor registered under [id] at [position] (overlay-local logical
+  /// px) via the in-app overlay, independent of pointer hover — pass `id: null`
+  /// or `position: null` to clear.
+  ///
+  /// This exists for the **web infinite-drag** wrap: while a drag holds a Pointer
+  /// Lock the real cursor is hidden and frozen, so [InfiniteDragController] (via
+  /// its `onCursorWrap`) feeds the wrapped fake-cursor position here to paint a
+  /// visible cursor that loops the viewport, matching the desktop edge-warp. The
+  /// cursor's hotspot lands on [position]. No-op unless a
+  /// [NativeMouseCursorOverlay] is mounted and enabled (`force: true`).
+  static void wrapOverlayCursor(String? id, ui.Offset? position) {
+    final overlay = _overlay;
+    if (overlay == null) return;
+    if (id == null || position == null) {
+      overlay.setWrapCursor(key: null, position: null);
+      return;
+    }
+    // angle 0, unflipped; also kicks off / retains the bake for the bitmap.
+    final cursor = _cache.get(id);
+    overlay.setWrapCursor(key: cursor?.key, position: position);
+  }
 
   // ──────────────────────────────── dispose ──────────────────────────────────
 
@@ -189,13 +218,12 @@ class NativeMouseCursor extends MouseCursor {
     double y, {
     double? viewportWidth,
     double? viewportHeight,
-  }) =>
-      NativeMouseCursorPlatform.instance.warpPointer(
-        x,
-        y,
-        viewportWidth: viewportWidth,
-        viewportHeight: viewportHeight,
-      );
+  }) => NativeMouseCursorPlatform.instance.warpPointer(
+    x,
+    y,
+    viewportWidth: viewportWidth,
+    viewportHeight: viewportHeight,
+  );
 
   /// Whether this host can teleport the pointer via [warpPointer] — `true` on
   /// macOS / Windows / Linux-X11, `false` on web / mobile / Linux-Wayland.
@@ -260,7 +288,11 @@ class NativeMouseCursor extends MouseCursor {
   ///    `image-set(... Nx)` so HiDPI browsers (Chrome/Safari) render it crisp.
   /// The hotspot is expressed in the lo bitmap's pixels (= CSS px).
   static Future<NativeMouseCursor> _createWeb(
-      ui.Image src, ui.Offset hotspot, double dpr, String key) async {
+    ui.Image src,
+    ui.Offset hotspot,
+    double dpr,
+    String key,
+  ) async {
     final logicalW = src.width / dpr;
     final logicalH = src.height / dpr;
     final maxLogical = math.max(logicalW, logicalH);
@@ -287,12 +319,12 @@ class NativeMouseCursor extends MouseCursor {
 
     final lo = await _resample(src, loW, loH);
     final hi = await _resample(src, hiW, hiH);
-    final loPng = (await lo.toByteData(format: ui.ImageByteFormat.png))!
-        .buffer
-        .asUint8List();
-    final hiPng = (await hi.toByteData(format: ui.ImageByteFormat.png))!
-        .buffer
-        .asUint8List();
+    final loPng = (await lo.toByteData(
+      format: ui.ImageByteFormat.png,
+    ))!.buffer.asUint8List();
+    final hiPng = (await hi.toByteData(
+      format: ui.ImageByteFormat.png,
+    ))!.buffer.asUint8List();
     lo.dispose();
     hi.dispose();
 
@@ -429,11 +461,7 @@ typedef CursorPainter = void Function(ui.Canvas canvas, ui.Size size);
 // Public registration goes through NativeMouseCursor.svg/.image/.draw/.builder.
 
 abstract class _Source {
-  const _Source({
-    required this.id,
-    this.hotspot,
-    this.shadow,
-  });
+  const _Source({required this.id, this.hotspot, this.shadow});
 
   /// Cache id — one bitmap is cached per (id, angle bucket, DPR, flip).
   final String id;
@@ -450,8 +478,12 @@ abstract class _Source {
   /// Rasterise the bitmap for [angle] (radians) at [dpr], optionally mirrored
   /// with [flipX]/[flipY]. Returns the bitmap and its hotspot in the bitmap's
   /// own LOGICAL px (box space).
-  Future<(ui.Image, ui.Offset)> render(double angle, double dpr,
-      {bool flipX = false, bool flipY = false});
+  Future<(ui.Image, ui.Offset)> render(
+    double angle,
+    double dpr, {
+    bool flipX = false,
+    bool flipY = false,
+  });
 }
 
 class _SvgSource extends _Source {
@@ -471,8 +503,12 @@ class _SvgSource extends _Source {
       _picture ??= vg.loadPicture(SvgAssetLoader(asset), null);
 
   @override
-  Future<(ui.Image, ui.Offset)> render(double angle, double dpr,
-      {bool flipX = false, bool flipY = false}) async {
+  Future<(ui.Image, ui.Offset)> render(
+    double angle,
+    double dpr, {
+    bool flipX = false,
+    bool flipY = false,
+  }) async {
     final info = await _load();
     final glyph = size ?? info.size;
     final box = _cursorBox(glyph, shadow: shadow);
@@ -486,9 +522,13 @@ class _SvgSource extends _Source {
       painter: (canvas, s) {
         canvas.save();
         canvas.translate(
-            (s.width - glyph.width) / 2, (s.height - glyph.height) / 2);
+          (s.width - glyph.width) / 2,
+          (s.height - glyph.height) / 2,
+        );
         canvas.scale(
-            glyph.width / info.size.width, glyph.height / info.size.height);
+          glyph.width / info.size.width,
+          glyph.height / info.size.height,
+        );
         canvas.drawPicture(info.picture);
         canvas.restore();
       },
@@ -496,7 +536,12 @@ class _SvgSource extends _Source {
     return (
       image,
       _transformHotspot(
-          _hotspotInBox(box, glyph, hotspot), box, angle, flipX, flipY)
+        _hotspotInBox(box, glyph, hotspot),
+        box,
+        angle,
+        flipX,
+        flipY,
+      ),
     );
   }
 }
@@ -516,8 +561,12 @@ class _ImageSource extends _Source {
       size ?? ui.Size(image.width.toDouble(), image.height.toDouble());
 
   @override
-  Future<(ui.Image, ui.Offset)> render(double angle, double dpr,
-      {bool flipX = false, bool flipY = false}) async {
+  Future<(ui.Image, ui.Offset)> render(
+    double angle,
+    double dpr, {
+    bool flipX = false,
+    bool flipY = false,
+  }) async {
     final glyph = _glyph;
     final box = _cursorBox(glyph, shadow: shadow);
     final out = await _bake(
@@ -531,16 +580,22 @@ class _ImageSource extends _Source {
         image,
         ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
         ui.Rect.fromCenter(
-            center: ui.Offset(s.width / 2, s.height / 2),
-            width: glyph.width,
-            height: glyph.height),
+          center: ui.Offset(s.width / 2, s.height / 2),
+          width: glyph.width,
+          height: glyph.height,
+        ),
         ui.Paint()..filterQuality = ui.FilterQuality.high,
       ),
     );
     return (
       out,
       _transformHotspot(
-          _hotspotInBox(box, glyph, hotspot), box, angle, flipX, flipY)
+        _hotspotInBox(box, glyph, hotspot),
+        box,
+        angle,
+        flipX,
+        flipY,
+      ),
     );
   }
 }
@@ -557,8 +612,12 @@ class _DrawSource extends _Source {
   final CursorPainter painter;
 
   @override
-  Future<(ui.Image, ui.Offset)> render(double angle, double dpr,
-      {bool flipX = false, bool flipY = false}) async {
+  Future<(ui.Image, ui.Offset)> render(
+    double angle,
+    double dpr, {
+    bool flipX = false,
+    bool flipY = false,
+  }) async {
     // Bake into a diagonal-padded box (like svg/image) and centre the painter's
     // own [size] box in it, so a rotated glyph never clips at the edges.
     final box = _cursorBox(size, shadow: shadow);
@@ -572,7 +631,9 @@ class _DrawSource extends _Source {
       painter: (canvas, s) {
         canvas.save();
         canvas.translate(
-            (s.width - size.width) / 2, (s.height - size.height) / 2);
+          (s.width - size.width) / 2,
+          (s.height - size.height) / 2,
+        );
         painter(canvas, size);
         canvas.restore();
       },
@@ -580,28 +641,33 @@ class _DrawSource extends _Source {
     return (
       image,
       _transformHotspot(
-          _hotspotInBox(box, size, hotspot), box, angle, flipX, flipY)
+        _hotspotInBox(box, size, hotspot),
+        box,
+        angle,
+        flipX,
+        flipY,
+      ),
     );
   }
 }
 
 class _BuilderSource extends _Source {
-  _BuilderSource({
-    required super.id,
-    required this.build,
-    super.hotspot,
-  });
+  _BuilderSource({required super.id, required this.build, super.hotspot});
   final Future<ui.Image> Function(double angle, double devicePixelRatio) build;
 
   // A builder owns its whole bitmap, so flip doesn't apply — it bakes its own.
   // Its [hotspot] is in the produced bitmap's logical px; null = its centre.
   @override
-  Future<(ui.Image, ui.Offset)> render(double angle, double dpr,
-      {bool flipX = false, bool flipY = false}) async {
+  Future<(ui.Image, ui.Offset)> render(
+    double angle,
+    double dpr, {
+    bool flipX = false,
+    bool flipY = false,
+  }) async {
     final image = await build(angle, dpr);
     return (
       image,
-      hotspot ?? ui.Offset(image.width / (2 * dpr), image.height / (2 * dpr))
+      hotspot ?? ui.Offset(image.width / (2 * dpr), image.height / (2 * dpr)),
     );
   }
 }
@@ -610,15 +676,22 @@ class _BuilderSource extends _Source {
 /// in the box), or the box centre when [hotspot] is null.
 ui.Offset _hotspotInBox(ui.Size box, ui.Size glyph, ui.Offset? hotspot) =>
     hotspot == null
-        ? ui.Offset(box.width / 2, box.height / 2)
-        : ui.Offset((box.width - glyph.width) / 2 + hotspot.dx,
-            (box.height - glyph.height) / 2 + hotspot.dy);
+    ? ui.Offset(box.width / 2, box.height / 2)
+    : ui.Offset(
+        (box.width - glyph.width) / 2 + hotspot.dx,
+        (box.height - glyph.height) / 2 + hotspot.dy,
+      );
 
 /// Apply the same mirror + rotation [`_bake`] gives the glyph (around the box
 /// centre) to a [box]-space hotspot [h], so the click point tracks the visible
 /// tip when the cursor is flipped or rotated. (Centre hotspots are unaffected.)
 ui.Offset _transformHotspot(
-    ui.Offset h, ui.Size box, double angle, bool flipX, bool flipY) {
+  ui.Offset h,
+  ui.Size box,
+  double angle,
+  bool flipX,
+  bool flipY,
+) {
   var dx = h.dx - box.width / 2;
   var dy = h.dy - box.height / 2;
   if (flipX) dx = -dx; // mirror first (matches _bake's scale-then-rotate)…
@@ -639,9 +712,11 @@ ui.Offset _transformHotspot(
 /// (notably Linux/GDK's scaled cursor surface).
 ui.Size _cursorBox(ui.Size content, {NativeCursorShadow? shadow}) {
   final core = math.sqrt(
-      content.width * content.width + content.height * content.height);
-  final pad =
-      shadow == null ? 0.0 : shadow.offset.distance + 3 * shadow.blurSigma;
+    content.width * content.width + content.height * content.height,
+  );
+  final pad = shadow == null
+      ? 0.0
+      : shadow.offset.distance + 3 * shadow.blurSigma;
   final side = (core + 2 * pad).ceilToDouble();
   return ui.Size(side, side);
 }
@@ -698,11 +773,17 @@ Future<ui.Image> _bake({
         ..filterQuality = ui.FilterQuality.high
         ..colorFilter = ui.ColorFilter.mode(shadow.color, ui.BlendMode.srcIn)
         ..imageFilter = ui.ImageFilter.blur(
-            sigmaX: shadow.blurSigma * dpr, sigmaY: shadow.blurSigma * dpr),
+          sigmaX: shadow.blurSigma * dpr,
+          sigmaY: shadow.blurSigma * dpr,
+        ),
     );
   }
   c2.drawImageRect(
-      glyphHi, src, dst, ui.Paint()..filterQuality = ui.FilterQuality.high);
+    glyphHi,
+    src,
+    dst,
+    ui.Paint()..filterQuality = ui.FilterQuality.high,
+  );
   glyphHi.dispose();
   final picture = r2.endRecording();
   final image = await picture.toImage(wpx, hpx);
@@ -723,10 +804,8 @@ class _Baked {
 /// build and returns the nearest already-built angle meanwhile, calling
 /// [onCursorReady] when the exact one lands so the widget rebuilds.
 class _CursorCache {
-  _CursorCache({
-    required double devicePixelRatio,
-    this.angleBucketDegrees = 4,
-  }) : _dpr = devicePixelRatio;
+  _CursorCache({required double devicePixelRatio, this.angleBucketDegrees = 4})
+    : _dpr = devicePixelRatio;
 
   double _dpr;
 
@@ -809,7 +888,12 @@ class _CursorCache {
   /// `ui.Image` was disposed) and store it under [key], keeping the native
   /// cursor. No-op unless retaining, already have it, or already rendering.
   void _ensureBitmap(
-      _Source source, String key, int bucket, bool flipX, bool flipY) {
+    _Source source,
+    String key,
+    int bucket,
+    bool flipX,
+    bool flipY,
+  ) {
     if (!retainBitmaps ||
         _bitmaps.containsKey(key) ||
         !_bitmapLoading.add(key)) {
@@ -817,9 +901,12 @@ class _CursorCache {
     }
     () async {
       try {
-        final (image, hotspot) = await source.render(bucket * math.pi / 180,
-            _dpr,
-            flipX: flipX, flipY: flipY);
+        final (image, hotspot) = await source.render(
+          bucket * math.pi / 180,
+          _dpr,
+          flipX: flipX,
+          flipY: flipY,
+        );
         if (retainBitmaps && _cache.containsKey(key)) {
           _bitmaps[key] = _Baked(image, hotspot);
           NativeMouseCursor._overlay?.bitmapReady();
@@ -861,8 +948,12 @@ class _CursorCache {
 
   /// The native cursor for a REGISTERED [id] at [angle] (radians) and flip, or
   /// null if [id] isn't registered or its bitmap isn't built yet.
-  NativeMouseCursor? get(String id,
-      {double angle = 0, bool flipX = false, bool flipY = false}) {
+  NativeMouseCursor? get(
+    String id, {
+    double angle = 0,
+    bool flipX = false,
+    bool flipY = false,
+  }) {
     final source = _registered[id];
     return source == null
         ? null
@@ -881,8 +972,12 @@ class _CursorCache {
   /// Return the cursor for [source] at [angle] + flip if baked, else kick off
   /// the bake and return the nearest already-baked bucket of the SAME flip
   /// meanwhile (null if none yet).
-  NativeMouseCursor? _build(_Source source,
-      {double angle = 0, bool flipX = false, bool flipY = false}) {
+  NativeMouseCursor? _build(
+    _Source source, {
+    double angle = 0,
+    bool flipX = false,
+    bool flipY = false,
+  }) {
     final bucket = _bucket(angle);
     if (bucket != 0) _warmCircle(source, flipX, flipY);
     final flip = _flip(flipX, flipY);
@@ -916,9 +1011,18 @@ class _CursorCache {
   }
 
   Future<void> _bakeAndStore(
-      _Source source, String key, int bucket, bool flipX, bool flipY) async {
-    final (image, hotspot) = await source.render(bucket * math.pi / 180, _dpr,
-        flipX: flipX, flipY: flipY);
+    _Source source,
+    String key,
+    int bucket,
+    bool flipX,
+    bool flipY,
+  ) async {
+    final (image, hotspot) = await source.render(
+      bucket * math.pi / 180,
+      _dpr,
+      flipX: flipX,
+      flipY: flipY,
+    );
     final native = await NativeMouseCursor._createNative(
       image,
       hotspot: hotspot,
@@ -950,7 +1054,8 @@ class _CursorCache {
       _cache.remove(key);
       _loading.remove(key);
     }
-    for (final key in _bitmaps.keys.where((k) => k.startsWith(prefix)).toList()) {
+    for (final key
+        in _bitmaps.keys.where((k) => k.startsWith(prefix)).toList()) {
       _bitmaps.remove(key)?.image.dispose();
     }
     _bitmapLoading.removeWhere((k) => k.startsWith(prefix));
@@ -983,11 +1088,14 @@ ui.Size cursorBoxForTest(ui.Size content, {NativeCursorShadow? shadow}) =>
     _cursorBox(content, shadow: shadow);
 
 @visibleForTesting
-ui.Offset hotspotInBoxForTest(
-        ui.Size box, ui.Size glyph, ui.Offset? hotspot) =>
+ui.Offset hotspotInBoxForTest(ui.Size box, ui.Size glyph, ui.Offset? hotspot) =>
     _hotspotInBox(box, glyph, hotspot);
 
 @visibleForTesting
 ui.Offset transformHotspotForTest(
-        ui.Offset h, ui.Size box, double angle, bool flipX, bool flipY) =>
-    _transformHotspot(h, box, angle, flipX, flipY);
+  ui.Offset h,
+  ui.Size box,
+  double angle,
+  bool flipX,
+  bool flipY,
+) => _transformHotspot(h, box, angle, flipX, flipY);

@@ -23,6 +23,20 @@ class _CursorOverlayController extends ChangeNotifier {
   bool _nativePointerHidden = false;
   bool _pointerSyncScheduled = false;
 
+  // Infinite-drag wrap cursor (web): a baked-bitmap cache-key painted at an
+  // explicit position, independent of hover — under a pointer lock there are no
+  // hover events to drive [_lastPosition]. Set via
+  // [NativeMouseCursor.wrapOverlayCursor].
+  String? _wrapKey;
+  Offset? _wrapPosition;
+
+  void setWrapCursor({String? key, Offset? position}) {
+    if (key == _wrapKey && position == _wrapPosition) return;
+    _wrapKey = key;
+    _wrapPosition = position;
+    if (enabled) notifyListeners();
+  }
+
   /// Turn the overlay on or off. On: retain baked bitmaps so we have something
   /// to paint, and route cursor sessions here. Off: drop the painted cursors and
   /// let sessions go back to the native cursor.
@@ -196,29 +210,159 @@ class _CursorOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (!_controller.enabled || _controller._active.isEmpty) return;
-    final pos = _controller._lastPosition;
-    if (pos == null) return;
+    if (!_controller.enabled) return;
     final cache = NativeMouseCursor._managed;
     if (cache == null) return;
     final dpr = cache.devicePixelRatio;
     final paint = Paint()..filterQuality = FilterQuality.high;
 
-    for (final key in _controller._active.values) {
+    // Draw the baked bitmap for [key] with its hotspot (logical, box space)
+    // landing on [at]. The bitmap is in device pixels; draw it at logical size.
+    void drawAt(String key, Offset at) {
       final baked = cache._bitmaps[key];
-      if (baked == null) continue;
-      // The bitmap is in device pixels; draw it at its logical size, with the
-      // hotspot (logical, box space) landing on the pointer.
+      if (baked == null) return;
       final w = baked.image.width / dpr;
       final h = baked.image.height / dpr;
       final src = Rect.fromLTWH(
-          0, 0, baked.image.width.toDouble(), baked.image.height.toDouble());
+        0,
+        0,
+        baked.image.width.toDouble(),
+        baked.image.height.toDouble(),
+      );
       final dst = Rect.fromLTWH(
-          pos.dx - baked.hotspot.dx, pos.dy - baked.hotspot.dy, w, h);
+        at.dx - baked.hotspot.dx,
+        at.dy - baked.hotspot.dy,
+        w,
+        h,
+      );
       canvas.drawImageRect(baked.image, src, dst, paint);
+    }
+
+    // Infinite-drag wrap cursor: an explicit key at an explicit position, painted
+    // even with no active hover session (the pointer is locked + hidden). While
+    // it's set it IS the cursor, so skip the frozen hover-session cursor below —
+    // otherwise both show at once (the "two cursors" bug).
+    final wrapKey = _controller._wrapKey;
+    final wrapPos = _controller._wrapPosition;
+    if (wrapKey != null && wrapPos != null) {
+      drawAt(wrapKey, wrapPos);
+      return;
+    }
+
+    // Normal per-region cursor sessions, painted at the last hover position.
+    final pos = _controller._lastPosition;
+    if (pos != null && _controller._active.isNotEmpty) {
+      for (final key in _controller._active.values) {
+        drawAt(key, pos);
+      }
     }
   }
 
   @override
   bool shouldRepaint(_CursorOverlayPainter oldDelegate) => false;
+}
+
+/// A transient, self-contained painted cursor for a web infinite drag — shows a
+/// cursor at the wrapped lock position **without** wrapping your app in a
+/// [NativeMouseCursorOverlay]. While the pointer is locked the OS cursor is
+/// hidden; this paints the baked bitmap of a registered cursor in a temporary
+/// [OverlayEntry] you put up only for the drag.
+///
+/// Drive it from [InfiniteDragController.start]'s `onCursorWrap`:
+/// ```dart
+/// DragCursorOverlay? _cursor;
+/// // onPointerDown:
+/// _cursor = DragCursorOverlay.show(context,
+///     cursor: NativeMouseCursor.get('scrub') as NativeMouseCursor);
+/// _drag.start(e.position,
+///   onLockedDelta: (d) => apply(d.dx),
+///   viewportSize: MediaQuery.sizeOf(context),
+///   onCursorWrap: (p) => _cursor?.update(p));
+/// // onPointerUp:
+/// _cursor?.remove();
+/// _cursor = null;
+/// ```
+class DragCursorOverlay {
+  DragCursorOverlay._(this._entry, this._position);
+
+  final OverlayEntry _entry;
+  final ValueNotifier<Offset?> _position;
+
+  /// Insert a transient overlay into the root [Overlay] above [context] that
+  /// paints [cursor]'s baked bitmap at the position you feed [update]
+  /// (overlay-local logical px; the cursor's hotspot lands on it). Returns null
+  /// if there's no [Overlay] above [context].
+  static DragCursorOverlay? show(
+    BuildContext context, {
+    required NativeMouseCursor cursor,
+  }) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return null;
+    // Keep the baked bitmap alive (it would otherwise be freed after the native
+    // cursor is built).
+    NativeMouseCursor._cache.enableRetention();
+    final position = ValueNotifier<Offset?>(null);
+    final entry = OverlayEntry(
+      builder: (_) => Positioned.fill(
+        child: IgnorePointer(
+          child: CustomPaint(painter: _DragCursorPainter(cursor.key, position)),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    return DragCursorOverlay._(entry, position);
+  }
+
+  /// Move the painted cursor to [position] (overlay-local logical px). Call from
+  /// `onCursorWrap`. Pass null to hide it.
+  void update(Offset? position) => _position.value = position;
+
+  /// Remove the overlay and release it. Call on drag end / cancel.
+  void remove() {
+    _entry.remove();
+    _position.dispose();
+  }
+}
+
+/// Paints the baked bitmap keyed by [_key] at [_position] (its hotspot on the
+/// point), repainting whenever the position changes.
+class _DragCursorPainter extends CustomPainter {
+  _DragCursorPainter(this._key, this._position) : super(repaint: _position);
+
+  final String _key;
+  final ValueListenable<Offset?> _position;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pos = _position.value;
+    if (pos == null) return;
+    final cache = NativeMouseCursor._managed;
+    if (cache == null) return;
+    final baked = cache._bitmaps[_key];
+    if (baked == null) return;
+    final dpr = cache.devicePixelRatio;
+    final w = baked.image.width / dpr;
+    final h = baked.image.height / dpr;
+    final src = Rect.fromLTWH(
+      0,
+      0,
+      baked.image.width.toDouble(),
+      baked.image.height.toDouble(),
+    );
+    final dst = Rect.fromLTWH(
+      pos.dx - baked.hotspot.dx,
+      pos.dy - baked.hotspot.dy,
+      w,
+      h,
+    );
+    canvas.drawImageRect(
+      baked.image,
+      src,
+      dst,
+      Paint()..filterQuality = FilterQuality.high,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_DragCursorPainter old) => old._key != _key;
 }

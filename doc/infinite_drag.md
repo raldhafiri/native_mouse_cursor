@@ -1,10 +1,27 @@
 # Infinite drag — technical details
 
-The [`InfiniteDragController`](../lib/infinite_drag.dart) gives an **infinite
-drag**: drag a value and it keeps changing forever, because the pointer never
-runs out of room. The consumer code is the same on every platform (see the
-[README](../README.md)) — this page documents how each platform achieves it under
-the hood, and what you need to build it.
+An **infinite drag**: drag a value and it keeps changing forever, because the
+pointer never runs out of room. The easy path is the
+[`InfiniteDragRegion`](../lib/infinite_drag_region.dart) widget — wrap your handle
+and it handles every platform and browser for you (see the
+[README](../README.md)). Under it sits
+[`InfiniteDragController`](../lib/infinite_drag.dart) for when you want to own the
+gesture. This page documents how each platform achieves it under the hood, and
+what you need to build it.
+
+## The easy path: `InfiniteDragRegion`
+
+```dart
+InfiniteDragRegion(
+  cursor: NativeMouseCursor.get('scrub', fallback: SystemMouseCursors.resizeLeftRight),
+  onScrub: (delta) => setState(() => value += delta.dx * scrubRate),
+  child: Text('$value'),
+)
+```
+
+It detects the host and chooses the gesture model + lock/warp strategy, arms the
+web Pointer Lock, and paints the wrapping cursor — everything below is what it
+does internally (and what you'd wire by hand with `InfiniteDragController`).
 
 ## Two strategies
 
@@ -30,7 +47,8 @@ right one per host:
 | <img src="platform_icons/windows.svg" width="20" height="20" alt="" align="top"> | **Windows** | Warp | `SetCursorPos`, mapped by ratio across the physical client rect | Visible, wraps. Correct at fractional DPI (e.g. 250 %). |
 | <img src="platform_icons/linux.svg" width="20" height="20" alt="" align="top"> | **Linux / X11** | Warp | `XWarpPointer` | Visible, wraps. |
 | <img src="platform_icons/linux.svg" width="20" height="20" alt="" align="top"> | **Linux / Wayland** | Lock | `pointer-constraints-v1` + `relative-pointer-v1` | **Frozen in place** (Wayland forbids warping). |
-| <img src="platform_icons/web.svg" width="20" height="20" alt="" align="top"> | **Web** | Lock | Pointer Lock API (`movementX`) | **Hidden** while dragging (browser policy). |
+| <img src="platform_icons/web.svg" width="20" height="20" alt="" align="top"> | **Web — Chrome / Safari / Edge** | Lock | Pointer Lock on **press** (`pointerdown`), `movementX` | Real cursor hidden; a baked cursor is painted **wrapping** the viewport. |
+| <img src="platform_icons/web.svg" width="20" height="20" alt="" align="top"> | **Web — Firefox** | Lock | Pointer Lock on **click** (`mousedown`-focus), `movementX` | Same wrapping cursor; **click-to-engage** (click / Esc to exit). |
 | <img src="platform_icons/apple.svg" width="20" height="20" alt="" align="top"> <img src="platform_icons/android.svg" width="20" height="20" alt="" align="top"> | **iOS / Android** | — | none | Ordinary clamped drag (no mouse-warp use case). |
 
 The lock strategy (Wayland, web) drives the value from a **polled motion
@@ -38,6 +56,45 @@ stream**: while locked, the OS stops sending ordinary motion to Flutter, so the
 gesture's `onDragUpdate` goes silent. The controller therefore polls the
 platform on a ticker and pushes deltas to the `onLockedDelta` callback you pass
 to `start()` — make sure you provide it (the warp platforms don't need it).
+
+## Web note — why Chrome press-drags but Firefox click-engages
+
+Browsers grant Pointer Lock only with [transient
+activation](https://developer.mozilla.org/en-US/docs/Web/API/Element/requestPointerLock)
+**and** while the document is focused. The document is focused as the *default
+action of `mousedown`* — which fires **after** `pointerdown`:
+
+```
+pointerdown → mousedown (focuses the document) → mouseup → click
+```
+
+- **Chrome / Safari / Edge** are lenient and grant a lock requested on
+  `pointerdown`, so a normal **press-drag** works: `InfiniteDragController.start`
+  requests the lock, and the value is driven by `onLockedDelta`.
+- **Firefox** strictly requires the document to already be focused, so a
+  `pointerdown` request (which is *before* the `mousedown` that focuses it) is
+  denied with `WrongDocumentError: document is not focused`. The fix is to lock
+  on a **`click`** (after focus) — i.e. **click-to-engage**: click to enter a
+  locked scrub, move, click / Esc to exit. The request must run in a **native
+  capture-phase** listener too, because Flutter `stopPropagation`s the click.
+
+`InfiniteDragRegion` reads `InfiniteDragController.isFirefoxWeb` and picks the
+model; the lower-level entry points are `startScrub`/`stopScrub` (click-engage),
+`armPointerLock` (gate which region engages, e.g. from `MouseRegion.onEnter`), and
+`lockPointer`, which now reports whether the lock actually engaged so a denied
+request degrades to a clamped drag instead of a dead one.
+
+### Wrapping cursor
+
+While locked the real cursor is hidden (browser policy), so the package paints a
+baked cursor **wrapping** the viewport instead, off the unbounded `movementX/Y`
+(`newPos = (pos + delta) % viewport` — the
+[MDN pointer-lock](https://mdn.github.io/dom-examples/pointer-lock/) trick),
+exposed as the pure `InfiniteDragController.wrapPosition(...)`. `InfiniteDragRegion`
+does this automatically when its `cursor` is a `NativeMouseCursor`; standalone you
+can use `DragCursorOverlay.show(context, cursor:)` (a transient painter, no
+app-wide overlay needed) or `NativeMouseCursor.wrapOverlayCursor(id, position)`
+(paints through an existing `NativeMouseCursorOverlay`).
 
 ## Windows DPI note
 

@@ -41,11 +41,12 @@ enum InfiniteDragAxis {
 /// ### Platform behaviour
 ///  * **macOS / Windows / Linux-X11** — the OS pointer is warped at the edge;
 ///    the cursor stays visible and the drag is truly infinite.
-///  * **Web** — the pointer is *locked* on [start] (cursor hidden) and the
-///    delta is sourced from pointer-lock movement, not from the Flutter delta
-///    you pass. There are no edges to wrap. ⚠️ UX difference: the cursor
-///    disappears for the duration of the drag (browser policy — there is no way
-///    to keep a locked cursor visible).
+///  * **Web** — the pointer is *locked* on [start] (the real cursor is hidden)
+///    and the delta is sourced from pointer-lock movement, not from the Flutter
+///    delta you pass. The browser can't keep a *locked* cursor visible, but you
+///    can opt into a painted **wrapping cursor** via [start]'s `onCursorWrap`
+///    (wired to [NativeMouseCursor.wrapOverlayCursor]): a fake cursor that loops
+///    the viewport off the accumulated motion, matching the desktop edge-warp.
 ///  * **Linux/Wayland** — warping is normally forbidden by the compositor, so
 ///    [warpAvailable] is `false` and the drag falls back to Flutter's clamped
 ///    delta (it stops at the window edge like an ordinary drag). See the README
@@ -111,6 +112,16 @@ class InfiniteDragController {
   Timer? _lockTicker;
   void Function(Offset delta)? _onLockedDelta;
 
+  /// Optional sink for the WRAPPED fake-cursor position on the lock path (web).
+  /// When the app passes [start]'s `onCursorWrap`, the controller accumulates the
+  /// locked motion into a fake cursor that wraps the viewport — mirroring the
+  /// desktop edge-warp — and pushes its position here each frame so a visible
+  /// cursor can be painted while the real pointer is locked + hidden. Null on the
+  /// warp path and when the app didn't opt in.
+  void Function(Offset position)? _onCursorWrap;
+  Size _wrapViewport = Size.zero;
+  Offset _fakeCursor = Offset.zero;
+
   /// Frames to ignore the edge-warp after one fires. A fast drag can queue
   /// several updates that all still report "near the edge" before the warp
   /// visibly lands, firing multiple conflicting warps ("goes crazy"). After a
@@ -122,13 +133,69 @@ class InfiniteDragController {
   /// (false before). Lets the UI decide e.g. whether to show an edge hint.
   bool get warpAvailable => _canWarp;
 
+  /// Web plumbing for [InfiniteDragRegion] — "arm" the lock while the pointer is
+  /// over the draggable so a press/click there engages a scrub. Use
+  /// [InfiniteDragRegion] instead.
+  @internal
+  void armPointerLock(bool armed) => _platform.setPointerLockArmed(armed);
+
+  /// Web plumbing for [InfiniteDragRegion] — true on Firefox, which needs a
+  /// click-engaged lock ([startScrub]) rather than press-drag. Use
+  /// [InfiniteDragRegion] instead.
+  @internal
+  bool get isFirefoxWeb => _platform.isFirefox;
+
+  /// Web plumbing for [InfiniteDragRegion] — engage a press/click Pointer Lock
+  /// scrub (the model that works on every browser, Firefox included), driving the
+  /// value from [onLockedDelta] and reporting enter/exit via [onActive]. Tear
+  /// down with [stopScrub]. Use [InfiniteDragRegion] instead.
+  @internal
+  void startScrub({
+    required void Function(Offset delta) onLockedDelta,
+    void Function(bool active)? onActive,
+  }) {
+    _onLockedDelta = onLockedDelta;
+    _platform.setPointerLockListener((locked) {
+      _locked = locked;
+      _dragging = locked;
+      if (locked) {
+        _startLockTicker();
+      } else {
+        _stopLockTicker();
+      }
+      onActive?.call(locked);
+    });
+    _platform.enablePointerLockScrub(true);
+  }
+
+  /// Web plumbing for [InfiniteDragRegion] — tear down [startScrub].
+  @internal
+  void stopScrub() {
+    _platform.enablePointerLockScrub(false);
+    _platform.setPointerLockListener(null);
+    _stopLockTicker();
+    if (_locked) {
+      _locked = false;
+      unawaited(_platform.unlockPointer());
+    }
+    _dragging = false;
+    _onLockedDelta = null;
+  }
+
   /// Whether a drag is currently active.
   bool get isDragging => _dragging;
 
   /// Begin an infinite drag. Pass the pointer's current **global** position
-  /// (`PointerEvent.position` / `d.globalPosition`). On web this requests
-  /// Pointer Lock (must be called from the gesture's start, which is a user
-  /// gesture). Returns when the platform has reported its warp capability.
+  /// (`PointerEvent.position` / `d.globalPosition`).
+  ///
+  /// **Web call site matters.** This requests Pointer Lock, which browsers grant
+  /// only from an *activating* event. Call it from a raw
+  /// `Listener.onPointerDown` — NOT `GestureDetector.onHorizontalDragStart`,
+  /// which fires during a `pointermove` (Firefox rejects the lock there, and
+  /// once locked the frozen position stops a gesture drag from ever being
+  /// recognised). On web the value is then driven entirely by [onLockedDelta];
+  /// call [end] from `onPointerUp`. On desktop, keep using the gesture callbacks
+  /// + [update] (the OS pointer warps at the edge).
   ///
   /// [onLockedDelta] is REQUIRED to support the **lock** path (web pointer-lock
   /// and Linux/Wayland): while the pointer is locked the OS stops sending motion
@@ -136,14 +203,61 @@ class InfiniteDragController {
   /// then polls the platform on a ticker and pushes the effective delta to this
   /// callback instead — apply your scrub there. On the warp path (macOS /
   /// Windows / Linux-X11) it isn't used; [update] drives the value as usual.
+  ///
+  /// [onCursorWrap] (lock path only) opts into a visible **wrapping cursor**: the
+  /// controller accumulates the locked motion into a fake cursor position that
+  /// wraps the viewport (the MDN pointer-lock trick) and calls this each frame.
+  /// Wire it to [NativeMouseCursor.wrapOverlayCursor] to paint the baked cursor,
+  /// or draw your own. Requires [viewportSize]. On the warp path it's unused (the
+  /// real OS cursor already wraps).
   Future<void> start(
     Offset globalPosition, {
     void Function(Offset delta)? onLockedDelta,
+    void Function(Offset position)? onCursorWrap,
+    Size? viewportSize,
   }) async {
+    assert(
+      onCursorWrap == null || viewportSize != null,
+      'Pass viewportSize to start() when using onCursorWrap — wrapping needs the '
+      'viewport bounds.',
+    );
     _dragging = true;
     _locked = false;
     _warpCooldown = 0;
     _onLockedDelta = onLockedDelta;
+    _onCursorWrap = onCursorWrap;
+    _wrapViewport = viewportSize ?? Size.zero;
+    _fakeCursor = globalPosition;
+
+    // WEB: never warps — it uses Pointer Lock, which the browser grants only off
+    // an active user gesture. requestPointerLock() must therefore run inside the
+    // gesture's synchronous call stack, BEFORE any `await` (an intervening
+    // microtask drops the activation — Firefox rejects it outright, Chrome is
+    // lenient). So fast-path web here and request the lock first, skipping the
+    // `await canWarpPointer()` round-trip that used to precede it.
+    if (kIsWeb) {
+      _canWarp = false;
+      if (onLockedDelta == null) {
+        assert(_warnNoLockedDelta());
+        return; // no delta sink → caller's update() drives a clamped drag.
+      }
+      // Request the lock synchronously (no await precedes this call). Do NOT
+      // suppress update() yet: until the lock actually engages, the caller's
+      // update() drives an ordinary CLAMPED drag. If it engages (Chrome), switch
+      // to the polled ticker for a true infinite drag. If it's DENIED — Firefox
+      // rejects a lock requested during a pointermove, which is exactly when
+      // GestureDetector fires onStart — the clamped drag just continues, with no
+      // flicker and no dead drag.
+      _platform.lockPointer().then((engaged) {
+        if (!_dragging || _locked) return;
+        if (engaged) {
+          _locked = true;
+          _startLockTicker();
+        }
+      });
+      return;
+    }
+
     _canWarp = await _platform.canWarpPointer();
     if (!_canWarp) {
       // The LOCK path drives the value via [onLockedDelta] (the OS stops sending
@@ -152,34 +266,41 @@ class InfiniteDragController {
       // freezes but nothing applies the motion. So only lock when we have a sink
       // for the deltas; otherwise fall back to Flutter's clamped delta (update()).
       if (onLockedDelta == null) {
-        assert(() {
-          if (kDebugMode) {
-            debugPrint('[InfiniteDrag] lock path skipped: start() was called '
-                'without onLockedDelta, so a locked drag could not update any '
-                'value. Pass onLockedDelta to enable infinite drag on web / '
-                'Wayland. Falling back to a clamped drag.');
-          }
-          return true;
-        }());
+        assert(_warnNoLockedDelta());
         return;
       }
-      // No native warp (web / Wayland / mobile). Try a pointer LOCK for a true
-      // infinite drag (web Pointer Lock API; Wayland pointer-constraints). If it
-      // engages, drive the value from a polled motion stream.
+      // No native warp (Wayland / mobile). Try a pointer LOCK for a true infinite
+      // drag (Wayland pointer-constraints). If it engages, drive the value from a
+      // polled motion stream.
       _locked = await _platform.lockPointer();
       if (_locked) _startLockTicker();
     }
+  }
+
+  // Debug-only warning when the lock path is requested without a delta sink.
+  bool _warnNoLockedDelta() {
+    if (kDebugMode) {
+      debugPrint(
+        '[InfiniteDrag] lock path skipped: start() was called without '
+        'onLockedDelta, so a locked drag could not update any value. Pass '
+        'onLockedDelta to enable infinite drag on web / Wayland. Falling back '
+        'to a clamped drag.',
+      );
+    }
+    return true;
   }
 
   // Poll the platform's locked-motion accumulator each frame and push the delta
   // to the app, since Flutter's own drag updates are silent under a lock.
   void _startLockTicker() {
     _lockTicker?.cancel();
-    _lockTicker =
-        Timer.periodic(const Duration(milliseconds: 16), (_) async {
+    _lockTicker = Timer.periodic(const Duration(milliseconds: 16), (_) async {
       if (!_locked || !_dragging) return;
       final d = await _platform.drainPointerLockDelta();
-      if (d != Offset.zero) _onLockedDelta?.call(d);
+      if (d == Offset.zero) return;
+      _onLockedDelta?.call(d);
+      final wrap = _onCursorWrap;
+      if (wrap != null) wrap(_advanceFakeCursor(d));
     });
   }
 
@@ -202,13 +323,11 @@ class InfiniteDragController {
     required Offset globalPosition,
     required Offset delta,
     required Size viewportSize,
-  }) async =>
-      (await updateOffset(
-        globalPosition: globalPosition,
-        delta: delta,
-        viewportSize: viewportSize,
-      ))
-          .dx;
+  }) async => (await updateOffset(
+    globalPosition: globalPosition,
+    delta: delta,
+    viewportSize: viewportSize,
+  )).dx;
 
   /// The 2-D form of [update]: returns the effective (dx, dy) for a free drag.
   /// Edge-wrapping is applied on whichever axis reaches a border.
@@ -291,6 +410,46 @@ class InfiniteDragController {
     return effective;
   }
 
+  // ─────────────────────────── web cursor wrap ────────────────────────────────
+
+  /// Wrap [pos] + [delta] within [viewport], honouring [axis]: the wrapped axis
+  /// folds with a modulo (re-entering the opposite edge — the MDN pointer-lock
+  /// trick), while the off-axis is clamped to the viewport so it can't drift out
+  /// of sight. Pure — handy for painting your own wrapping cursor from the
+  /// `onCursorWrap` / `onLockedDelta` deltas.
+  static Offset wrapPosition(
+    Offset pos,
+    Offset delta,
+    Size viewport,
+    InfiniteDragAxis axis,
+  ) {
+    final double w = viewport.width, h = viewport.height;
+    final bool wrapX = axis != InfiniteDragAxis.vertical;
+    final bool wrapY = axis != InfiniteDragAxis.horizontal;
+    double x = pos.dx + delta.dx;
+    double y = pos.dy + delta.dy;
+    if (w > 0) {
+      if (wrapX) {
+        x %= w;
+        if (x < 0) x += w;
+      } else {
+        x = x.clamp(0.0, w);
+      }
+    }
+    if (h > 0) {
+      if (wrapY) {
+        y %= h;
+        if (y < 0) y += h;
+      } else {
+        y = y.clamp(0.0, h);
+      }
+    }
+    return Offset(x, y);
+  }
+
+  Offset _advanceFakeCursor(Offset delta) =>
+      _fakeCursor = wrapPosition(_fakeCursor, delta, _wrapViewport, axis);
+
   /// End the active drag: releases the pointer lock (re-showing/unfreezing the
   /// cursor) and stops sourcing lock movement. Safe to call when no drag is
   /// active.
@@ -298,6 +457,7 @@ class InfiniteDragController {
     _dragging = false;
     _stopLockTicker();
     _onLockedDelta = null;
+    _onCursorWrap = null;
     if (_locked) {
       _locked = false;
       await _platform.unlockPointer();
@@ -312,6 +472,7 @@ class InfiniteDragController {
   void dispose() {
     _stopLockTicker();
     _onLockedDelta = null;
+    _onCursorWrap = null;
     if (_locked) {
       _locked = false;
       unawaited(_platform.unlockPointer());

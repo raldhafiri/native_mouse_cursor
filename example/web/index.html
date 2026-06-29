@@ -119,19 +119,28 @@
     const userConfig = {'wasmAllowList': {'gecko': true, 'webkit': true}};
     const searchParams = new URLSearchParams(window.location.search);
 
-    // Which renderers did THIS build actually ship? A `flutter build web`
-    // (default) bundles BOTH skwasm (Wasm) and canvaskit (JS). A
-    // `flutter build web --wasm` is Wasm-ONLY — there's no canvaskit variant, so
-    // forcing renderer:'canvaskit' makes the loader throw "could not find a
-    // build compatible…". Inspect the build config and only honour ?js if a
-    // canvaskit (JS) build is present; otherwise ignore it and flag the toggle.
+    // Which renderers did THIS build actually ship?
+    //   • `flutter build web`        → CanvasKit (JS / dart2js) ONLY.
+    //   • `flutter build web --wasm` → Skwasm (Wasm / dart2wasm) PLUS a
+    //                                  CanvasKit (JS) fallback for browsers
+    //                                  without WasmGC.
+    // So the pill must reflect what shipped (and what actually loaded), not just
+    // the ?js param — a no-`--wasm` build has no ?js yet still runs CanvasKit.
     var jsBuildAvailable = false;
+    var wasmBuildAvailable = false;
     try {
       var builds = (_flutter && _flutter.buildConfig && _flutter.buildConfig.builds) || [];
       jsBuildAvailable = builds.some(function (b) {
         return b && (b.renderer === 'canvaskit' || b.compileTarget === 'dart2js');
       });
-    } catch (e) { /* be permissive if the shape changes */ jsBuildAvailable = true; }
+      wasmBuildAvailable = builds.some(function (b) {
+        return b && (b.renderer === 'skwasm' || b.compileTarget === 'dart2wasm');
+      });
+    } catch (e) {
+      /* be permissive if the shape changes */
+      jsBuildAvailable = true;
+      wasmBuildAvailable = true;
+    }
 
     if (searchParams.has('js') && jsBuildAvailable) {
         userConfig.renderer = 'canvaskit';
@@ -140,24 +149,50 @@
         userConfig.forceSingleThreadedSkwasm = true;
     }
 
-    // Tell the toggle whether a JS build exists so it can disable itself with a
-    // hint instead of reloading into a broken state.
+    // Make the pill reflect REALITY (what shipped + what actually loaded), not
+    // the ?js intent.
     (function () {
       var btn = document.getElementById('renderer-toggle');
       if (!btn) return;
-      if (!jsBuildAvailable) {
-        // No JS variant in this build: if we somehow landed on ?js, drop it.
-        if (searchParams.has('js')) {
-          var p = new URLSearchParams(window.location.search);
-          p.delete('js');
-          var qs = p.toString();
-          window.history.replaceState({}, '', qs ? '?' + qs : window.location.pathname);
-        }
-        btn.classList.add('disabled');
-        btn.querySelector('.label').textContent = 'Wasm only';
-        btn.title = 'This build is Wasm-only (built with --wasm). Rebuild with ' +
-          '`flutter build web` (no --wasm) to enable the JS/CanvasKit toggle.';
+      var lbl = btn.querySelector('.label');
+      function paint(isJs) {
+        lbl.textContent = isJs ? 'JS (CanvasKit)' : 'Wasm (Skwasm)';
+        btn.classList.toggle('js', isJs);
       }
+      function dropJsParam() {
+        if (!searchParams.has('js')) return;
+        var p = new URLSearchParams(window.location.search);
+        p.delete('js');
+        var qs = p.toString();
+        window.history.replaceState({}, '', qs ? '?' + qs : window.location.pathname);
+      }
+
+      if (!(jsBuildAvailable && wasmBuildAvailable)) {
+        // Single-renderer build: show what it is and disable the toggle.
+        dropJsParam();
+        btn.classList.add('disabled');
+        if (!wasmBuildAvailable) {
+          paint(true); // CanvasKit / JS only (built without --wasm)
+          btn.title = 'JS-only build (built without --wasm). Rebuild with ' +
+            '`flutter build web --wasm` to enable Wasm / Skwasm.';
+        } else {
+          paint(false); // Wasm / Skwasm only
+          btn.title = 'Wasm-only build. Rebuild with `flutter build web` to ' +
+            'enable the JS / CanvasKit toggle.';
+        }
+        return;
+      }
+
+      // Both shipped: the early guess (from ?js) shows now; correct it to the
+      // ACTUAL renderer once running — CanvasKit sets window.flutterCanvasKit,
+      // Skwasm does not — so a Wasm→JS fallback (no WasmGC) reads correctly too.
+      window.addEventListener('flutter-first-frame', function () {
+        var isJs = typeof window.flutterCanvasKit !== 'undefined';
+        paint(isJs);
+        btn.title = isJs
+          ? 'Renderer: JS / CanvasKit — click for Wasm (reloads)'
+          : 'Renderer: Wasm / Skwasm — click for JS / CanvasKit (reloads)';
+      }, { once: true });
     })();
 
     _flutter.loader.load({config: userConfig});
